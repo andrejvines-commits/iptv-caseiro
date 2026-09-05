@@ -66,6 +66,8 @@ public class MainActivity extends Activity {
     private long downloadId = -1;
     private File pendingApk;
     private boolean waitingInstallPermission;
+    private boolean checkingForUpdates;
+    private AlertDialog updateProgressDialog;
 
     private final BroadcastReceiver downloadReceiver = new BroadcastReceiver() {
         @Override
@@ -248,6 +250,7 @@ public class MainActivity extends Activity {
     }
 
     private void checkForUpdates(Button button) {
+        if (checkingForUpdates) return;
         String repository = BuildConfig.GITHUB_REPOSITORY;
         if (repository.startsWith("SEU_USUARIO/")) {
             new AlertDialog.Builder(this)
@@ -257,8 +260,15 @@ public class MainActivity extends Activity {
                 .show();
             return;
         }
+        checkingForUpdates = true;
         button.setEnabled(false);
         button.setText("Verificando…");
+        updateProgressDialog = new AlertDialog.Builder(this)
+            .setTitle("Verificando atualização")
+            .setMessage("Consultando a versão mais recente…")
+            .setCancelable(false)
+            .create();
+        updateProgressDialog.show();
         executor.execute(() -> {
             try {
                 URL api = new URL("https://api.github.com/repos/" + repository + "/releases/latest");
@@ -267,8 +277,9 @@ public class MainActivity extends Activity {
                 connection.setReadTimeout(12_000);
                 connection.setRequestProperty("Accept", "application/vnd.github+json");
                 connection.setRequestProperty("User-Agent", "IPTV-Caseiro-Android");
-                if (connection.getResponseCode() != 200) {
-                    throw new IllegalStateException("GitHub respondeu " + connection.getResponseCode());
+                int responseCode = connection.getResponseCode();
+                if (responseCode != 200) {
+                    throw new IllegalStateException("O GitHub respondeu com o código " + responseCode + ".");
                 }
                 StringBuilder body = new StringBuilder();
                 try (BufferedReader reader = new BufferedReader(new InputStreamReader(
@@ -279,16 +290,52 @@ public class MainActivity extends Activity {
                 JSONObject release = new JSONObject(body.toString());
                 String latestVersion = release.getString("tag_name").replaceFirst("^[vV]", "");
                 String apkUrl = findApkUrl(release.getJSONArray("assets"));
-                runOnUiThread(() -> showUpdateResult(latestVersion, apkUrl));
+                connection.disconnect();
+                runOnUiThread(() -> {
+                    closeUpdateProgress();
+                    showUpdateResult(latestVersion, apkUrl);
+                });
             } catch (Exception error) {
-                runOnUiThread(() -> message("Não foi possível verificar atualizações. Verifique a internet e tente novamente."));
+                runOnUiThread(() -> {
+                    closeUpdateProgress();
+                    showUpdateError(button, error.getMessage());
+                });
             } finally {
                 runOnUiThread(() -> {
+                    checkingForUpdates = false;
                     button.setEnabled(true);
                     button.setText("Atualizar");
                 });
             }
         });
+    }
+
+    private void closeUpdateProgress() {
+        if (updateProgressDialog != null && updateProgressDialog.isShowing()) {
+            updateProgressDialog.dismiss();
+        }
+        updateProgressDialog = null;
+    }
+
+    private void showUpdateError(Button button, String detail) {
+        String reason = detail == null || detail.isBlank()
+            ? "Não foi possível consultar o GitHub."
+            : detail;
+        new AlertDialog.Builder(this)
+            .setTitle("Falha ao verificar atualização")
+            .setMessage(reason + "\n\nVersão instalada: " + BuildConfig.VERSION_NAME)
+            .setNegativeButton("Abrir página de download", (dialog, which) -> openDownloadPage())
+            .setPositiveButton("Tentar novamente", (dialog, which) -> checkForUpdates(button))
+            .show();
+    }
+
+    private void openDownloadPage() {
+        String url = "https://github.com/" + BuildConfig.GITHUB_REPOSITORY + "/releases/latest";
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (Exception error) {
+            message("Nenhum aplicativo conseguiu abrir a página de download.");
+        }
     }
 
     private String findApkUrl(JSONArray assets) throws Exception {
@@ -311,7 +358,12 @@ public class MainActivity extends Activity {
             return;
         }
         if (apkUrl.isEmpty()) {
-            message("A versão " + latestVersion + " existe, mas não contém " + APK_NAME + ".");
+            new AlertDialog.Builder(this)
+                .setTitle("APK não encontrado")
+                .setMessage("A versão " + latestVersion + " foi encontrada, mas não contém " + APK_NAME + ".\n\nVersão instalada: " + BuildConfig.VERSION_NAME)
+                .setNegativeButton("Fechar", null)
+                .setPositiveButton("Abrir página", (dialog, which) -> openDownloadPage())
+                .show();
             return;
         }
         new AlertDialog.Builder(this)
@@ -433,6 +485,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        closeUpdateProgress();
         unregisterReceiver(downloadReceiver);
         webView.destroy();
         executor.shutdownNow();
