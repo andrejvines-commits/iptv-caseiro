@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Administração | IPTV Caseiro{% endblock %}
+{% block content %}
+<main class="admin-page">
+  <div class="admin-heading">
+    <div><p class="eyebrow">Configuração local</p><h1>Administrar canais</h1></div>
+    <div class="heading-actions">
+      <a class="secondary-button" href="{{ url_for('import_playlist') }}"><i class="bi bi-cloud-arrow-down"></i><span>Importar M3U</span></a>
+      <a class="secondary-button" href="{{ url_for('playlist') }}"><i class="bi bi-download"></i><span>Baixar M3U</span></a>
+    </div>
+  </div>
+
+  <section class="admin-layout">
+    <form class="channel-form" method="post" action="{{ url_for('edit_channel', channel_id=editing.id) if editing else url_for('admin') }}">
+      <div class="form-heading">
+        <h2>{{ 'Editar canal' if editing else 'Novo canal' }}</h2>
+        {% if editing %}<a href="{{ url_for('admin') }}" title="Cancelar edição" aria-label="Cancelar edição"><i class="bi bi-x-lg"></i></a>{% endif %}
+      </div>
+      <label>Nome<input name="nome" maxlength="120" required value="{{ editing.nome if editing else '' }}"></label>
+      <label>Descrição<textarea name="descricao" maxlength="500" rows="3">{{ editing.descricao if editing else '' }}</textarea></label>
+      <label>Categoria<input name="categoria" maxlength="80" value="{{ editing.categoria if editing else 'Geral' }}"></label>
+      <label>Logo <span>(URL opcional)</span><input name="logo" type="url" placeholder="https://..." value="{{ editing.logo if editing else '' }}"></label>
+      <div class="form-row">
+        <label>Tipo<select name="tipo" id="channel-type"><option value="arquivo" {{ 'selected' if not editing or editing.tipo == 'arquivo' else '' }}>Arquivo local</option><option value="stream" {{ 'selected' if editing and editing.tipo == 'stream' else '' }}>Stream</option><option value="externo" {{ 'selected' if editing and editing.tipo == 'externo' else '' }}>Link externo</option></select></label>
+        <label class="switch-label">Ativo<input name="ativo" type="checkbox" {{ 'checked' if not editing or editing.ativo else '' }}><span class="switch"></span></label>
+      </div>
+      <label>Fonte<input name="fonte" id="channel-source" required placeholder="video.mp4" value="{{ editing.fonte if editing else '' }}"><small id="source-help">Nome do arquivo dentro da pasta videos.</small></label>
+      <button class="primary-button" type="submit"><i class="bi bi-check-lg"></i><span>{{ 'Salvar alterações' if editing else 'Cadastrar canal' }}</span></button>
+    </form>
+
+    <section class="channel-list">
+      <div class="list-heading">
+        <div class="list-title"><h2>Canais cadastrados</h2><span>{{ channels|length }}</span></div>
+        <form id="bulk-delete-form" method="post" action="{{ url_for('delete_multiple_channels') }}" data-confirm="Excluir todos os canais selecionados?">
+          <button class="bulk-delete-button" id="bulk-delete-button" type="submit" disabled>
+            <i class="bi bi-trash3"></i><span>Excluir <b id="bulk-selected-count">0</b></span>
+          </button>
+        </form>
+      </div>
+      {% if channels %}
+        <label class="admin-select-all"><input type="checkbox" id="admin-select-all"><span>Selecionar todos</span></label>
+      {% endif %}
+      {% for channel in channels %}
+        <article class="admin-channel {{ 'inactive' if not channel.ativo else '' }}">
+          <input class="admin-channel-checkbox" type="checkbox" name="selected" value="{{ channel.id }}" form="bulk-delete-form" aria-label="{{ 'Canal favorito protegido contra exclusão' if channel.favorito else 'Selecionar ' ~ channel.nome }}" {{ 'disabled' if channel.favorito else '' }}>
+          <div class="admin-channel-icon"><i class="bi {{ 'bi-file-play' if channel.tipo == 'arquivo' else ('bi-box-arrow-up-right' if channel.tipo == 'externo' else 'bi-broadcast') }}"></i></div>
+          <div class="admin-channel-copy">
+            <h3>{{ channel.nome }}{% if channel.favorito %} <i class="bi bi-star-fill favorite-mark" title="Favorito protegido" aria-label="Favorito protegido"></i>{% endif %}</h3><p>{{ channel.categoria }} · {{ channel.tipo|capitalize }}{% if channel.favorito %} · Protegido{% endif %}</p>
+          </div>
+          <span class="status-pill">{{ 'Ativo' if channel.ativo else 'Inativo' }}</span>
+          <div class="row-actions">
+            <a href="{{ url_for('edit_channel', channel_id=channel.id) }}" title="Editar {{ channel.nome }}" aria-label="Editar {{ channel.nome }}"><i class="bi bi-pencil"></i></a>
+            <form method="post" action="{{ url_for('toggle_channel', channel_id=channel.id) }}"><button title="{{ 'Desativar' if channel.ativo else 'Ativar' }} {{ channel.nome }}" aria-label="{{ 'Desativar' if channel.ativo else 'Ativar' }} {{ channel.nome }}"><i class="bi {{ 'bi-eye-slash' if channel.ativo else 'bi-eye' }}"></i></button></form>
+            {% if channel.favorito %}
+              <form method="post" action="{{ url_for('toggle_favorite', channel_id=channel.id) }}">
+                <input type="hidden" name="origem" value="admin">
+                <button class="remove-favorite-icon" title="Remover {{ channel.nome }} dos favoritos para permitir exclusão" aria-label="Remover {{ channel.nome }} dos favoritos para permitir exclusão"><i class="bi bi-star-fill"></i></button>
+              </form>
+            {% else %}
+              <form method="post" action="{{ url_for('delete_channel', channel_id=channel.id) }}" data-confirm="Excluir este canal?"><button class="danger-icon" title="Excluir {{ channel.nome }}" aria-label="Excluir {{ channel.nome }}"><i class="bi bi-trash3"></i></button></form>
+            {% endif %}
+          </div>
+        </article>
+      {% else %}<div class="empty-compact">Nenhum canal cadastrado.</div>{% endfor %}
+    </section>
+  </section>
+</main>
+{% endblock %}

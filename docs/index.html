@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101315">
+  <title>IPTV Caseiro para Android</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101315; --panel:#181d20; --line:#30383d; --text:#f4f6f7; --muted:#aab2b7; --accent:#e64b3c; --green:#45c78a; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:320px; background:radial-gradient(circle at 75% 10%,#292023 0,transparent 32rem),var(--bg); color:var(--text); font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { width:min(940px,calc(100% - 36px)); min-height:100vh; margin:auto; display:grid; grid-template-columns:1.2fr .8fr; align-items:center; gap:64px; padding:64px 0; }
+    .eyebrow { color:var(--accent); font-size:13px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
+    h1 { margin:8px 0 20px; font-size:clamp(42px,7vw,76px); line-height:.98; letter-spacing:-.045em; }
+    .lead { max-width:650px; color:var(--muted); font-size:19px; }
+    .actions { margin:30px 0 18px; display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+    button,a.button { min-height:52px; padding:0 22px; display:inline-flex; align-items:center; justify-content:center; color:white; background:var(--accent); border:0; border-radius:8px; font:inherit; font-weight:750; text-decoration:none; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:wait; }
+    .version { color:var(--muted); font-size:14px; }
+    .card { padding:28px; background:rgba(24,29,32,.94); border:1px solid var(--line); border-radius:12px; box-shadow:0 24px 80px rgba(0,0,0,.24); }
+    .card h2 { margin:0 0 18px; font-size:20px; }
+    ol { margin:0; padding-left:22px; }
+    li+li { margin-top:12px; }
+    .safe { margin-top:22px; padding-top:18px; display:flex; gap:10px; color:var(--muted); border-top:1px solid var(--line); font-size:14px; }
+    .dot { width:10px; height:10px; margin-top:6px; flex:0 0 auto; background:var(--green); border-radius:50%; }
+    #status[aria-live] { min-height:24px; color:var(--muted); }
+    @media (max-width:760px) { main { grid-template-columns:1fr; gap:36px; padding:44px 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <p class="eyebrow">Aplicativo Android</p>
+      <h1>IPTV<br>Caseiro</h1>
+      <p class="lead">Acesse no celular o catálogo que está rodando no seu computador ou servidor. Instale o APK e informe o endereço exibido pelo IPTV Caseiro.</p>
+      <div class="actions">
+        <button id="install" type="button">Baixar para Android</button>
+        <span class="version" id="version">Buscando versão…</span>
+      </div>
+      <p id="status" aria-live="polite"></p>
+    </section>
+    <aside class="card">
+      <h2>Como instalar</h2>
+      <ol>
+        <li>Baixe o arquivo <strong>iptv-caseiro.apk</strong>.</li>
+        <li>Abra o download e permita a instalação dessa fonte quando o Android solicitar.</li>
+        <li>Abra o app e informe o endereço do servidor, como <strong>http://192.168.1.20:5000</strong>.</li>
+        <li>Nas próximas versões, use o botão <strong>Atualizar</strong> dentro do aplicativo.</li>
+      </ol>
+      <div class="safe"><span class="dot"></span><span>O app solicita somente internet, estado da rede e autorização para abrir a instalação de atualizações.</span></div>
+    </aside>
+  </main>
+  <script>
+    const repository = "__GITHUB_REPOSITORY__";
+    const install = document.querySelector("#install");
+    const version = document.querySelector("#version");
+    const status = document.querySelector("#status");
+    let apkUrl = "";
+
+    async function loadRelease() {
+      if (repository.startsWith("__")) {
+        version.textContent = "Página ainda não publicada";
+        status.textContent = "Publique esta pasta com o workflow do GitHub Pages.";
+        install.disabled = true;
+        return;
+      }
+      try {
+        const response = await fetch(`https://api.github.com/repos/${repository}/releases/latest`, {
+          headers: { Accept: "application/vnd.github+json" }
+        });
+        if (!response.ok) throw new Error(`GitHub respondeu ${response.status}`);
+        const release = await response.json();
+        const asset = release.assets.find(item => item.name === "iptv-caseiro.apk");
+        if (!asset) throw new Error("A versão mais recente não contém o APK");
+        apkUrl = asset.browser_download_url;
+        version.textContent = `Versão ${release.tag_name.replace(/^v/i, "")}`;
+      } catch (error) {
+        install.disabled = true;
+        version.textContent = "Download indisponível";
+        status.textContent = error.message;
+      }
+    }
+
+    install.addEventListener("click", () => {
+      if (apkUrl) window.location.assign(apkUrl);
+    });
+    loadRelease();
+  </script>
+</body>
+</html>

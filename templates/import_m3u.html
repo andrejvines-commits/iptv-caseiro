@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Importar M3U | IPTV Caseiro{% endblock %}
+{% block content %}
+<main class="admin-page import-page">
+  <a class="back-link" href="{{ url_for('admin') }}"><i class="bi bi-arrow-left"></i><span>Voltar à administração</span></a>
+  <div class="admin-heading">
+    <div><p class="eyebrow">Adicionar vários canais</p><h1>Importar playlist M3U</h1></div>
+  </div>
+
+  <form class="import-source" method="post">
+    <label>URL pública da playlist
+      <div class="source-row">
+        <input name="url" type="url" required value="{{ source_url }}" placeholder="https://exemplo.com/lista.m3u">
+        <button class="primary-button" type="submit" name="action" value="preview"><i class="bi bi-search"></i><span>Buscar canais</span></button>
+      </div>
+    </label>
+    <p>Lista sugerida: IPTV-org Brasil. A disponibilidade e a autorização de cada transmissão devem ser verificadas na origem.</p>
+  </form>
+
+  {% if channels %}
+    <form class="import-results" method="post">
+      <input type="hidden" name="url" value="{{ source_url }}">
+      <div class="import-toolbar">
+        <label class="check-all"><input type="checkbox" id="select-all"><span>Selecionar todos</span></label>
+        <strong>{{ channels|length }} canais encontrados</strong>
+        <button class="primary-button" type="submit" name="action" value="import"><i class="bi bi-plus-lg"></i><span>Importar selecionados</span></button>
+      </div>
+      <div class="import-list">
+        {% for channel in channels %}
+          <label class="import-channel">
+            <input class="channel-checkbox" type="checkbox" name="selected" value="{{ loop.index0 }}">
+            <span class="import-logo">
+              {% if channel.logo %}<img src="{{ channel.logo }}" alt="" loading="lazy">{% else %}<i class="bi bi-tv"></i>{% endif %}
+            </span>
+            <span class="import-copy"><strong>{{ channel.name }}</strong><small>{{ channel.category }}</small></span>
+          </label>
+        {% endfor %}
+      </div>
+    </form>
+  {% endif %}
+</main>
+{% endblock %}

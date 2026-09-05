@@ -1,0 +1,6 @@
+Coloque seus vídeos autorizados nesta pasta.
+
+Para testar o canal criado automaticamente, use o nome:
+video-teste.mp4
+
+O sistema aceita inicialmente: .mp4, .webm, .ogg e .m4v.

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ channel.nome }} | IPTV Caseiro{% endblock %}
+{% block content %}
+<main class="player-page">
+  <a class="back-link" href="{{ url_for('index') }}"><i class="bi bi-arrow-left"></i><span>Voltar aos canais</span></a>
+  <div class="player-heading">
+    <div>
+      <p class="eyebrow">{{ channel.categoria }}</p>
+      <h1>{{ channel.nome }}</h1>
+    </div>
+    <div class="player-heading-actions">
+      <form method="post" action="{{ url_for('toggle_favorite', channel_id=channel.id) }}">
+        <button class="favorite-button {{ 'is-favorite' if channel.favorito else '' }}" type="submit" aria-pressed="{{ 'true' if channel.favorito else 'false' }}" title="{{ 'Remover dos favoritos' if channel.favorito else 'Adicionar aos favoritos' }}">
+          <i class="bi {{ 'bi-star-fill' if channel.favorito else 'bi-star' }}"></i>
+          <span>{{ 'Favorito' if channel.favorito else 'Favoritar' }}</span>
+        </button>
+      </form>
+      <span class="source-badge"><i class="bi bi-broadcast"></i>{{ channel.tipo|capitalize }}</span>
+    </div>
+  </div>
+
+  <section class="video-stage">
+    {% if source_available %}
+      <video id="video-player" controls playsinline preload="metadata" data-source="{{ source }}" data-type="{{ channel.tipo }}"></video>
+      <div class="player-loading" id="player-loading"><span class="spinner"></span><span>Preparando reprodução...</span></div>
+      <div class="player-error" id="player-error" hidden>
+        <i class="bi bi-exclamation-triangle"></i>
+        <strong>Não foi possível reproduzir este conteúdo.</strong>
+        <span>Verifique a fonte, o formato e sua conexão.</span>
+      </div>
+    {% else %}
+      <div class="missing-video">
+        <i class="bi bi-file-earmark-play"></i>
+        <h2>Vídeo de teste ainda não encontrado</h2>
+        <p>Coloque <strong>{{ channel.fonte }}</strong> na pasta <strong>videos</strong> e recarregue esta página.</p>
+      </div>
+    {% endif %}
+  </section>
+  <nav class="tv-controls" aria-label="Controles de canal e volume">
+    <div class="tv-control-group">
+      <span class="control-label">Canal</span>
+      {% if previous_channel %}
+        <a class="control-button" href="{{ url_for('player', channel_id=previous_channel.id, autoplay=1) }}" title="Canal anterior: {{ previous_channel.nome }}" aria-label="Canal anterior: {{ previous_channel.nome }}"><i class="bi bi-chevron-down"></i></a>
+        <a class="control-button" href="{{ url_for('player', channel_id=next_channel.id, autoplay=1) }}" title="Próximo canal: {{ next_channel.nome }}" aria-label="Próximo canal: {{ next_channel.nome }}"><i class="bi bi-chevron-up"></i></a>
+      {% else %}
+        <button class="control-button" disabled title="Não há outro canal"><i class="bi bi-chevron-down"></i></button>
+        <button class="control-button" disabled title="Não há outro canal"><i class="bi bi-chevron-up"></i></button>
+      {% endif %}
+    </div>
+    <div class="now-playing"><i class="bi bi-broadcast"></i><span>{{ channel.nome }}</span></div>
+    <div class="tv-control-group volume-controls">
+      <span class="control-label">Volume</span>
+      <button class="control-button" id="volume-down" type="button" title="Diminuir volume" aria-label="Diminuir volume"><i class="bi bi-volume-down-fill"></i></button>
+      <button class="control-button" id="volume-toggle" type="button" title="Ativar ou desativar som" aria-label="Ativar ou desativar som"><i class="bi bi-volume-up-fill"></i></button>
+      <button class="control-button" id="volume-up" type="button" title="Aumentar volume" aria-label="Aumentar volume"><i class="bi bi-volume-up-fill"></i></button>
+      <output id="volume-level" aria-live="polite">100%</output>
+    </div>
+  </nav>
+  {% if channel.descricao %}<p class="player-description">{{ channel.descricao }}</p>{% endif %}
+  {% if not ffmpeg_available %}
+    <p class="ffmpeg-note"><i class="bi bi-info-circle"></i> FFmpeg não está instalado. A reprodução compatível com o navegador continua disponível; conversões avançadas ficam desativadas.</p>
+  {% endif %}
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script src="{{ url_for('static', filename='js/player.js') }}" defer></script>
+{% endblock %}

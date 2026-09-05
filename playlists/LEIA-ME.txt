@@ -1,0 +1,4 @@
+Esta pasta guarda a cópia local de reserva da playlist brasileira.
+
+O arquivo br.m3u é obtido de:
+https://iptv-org.github.io/iptv/countries/br.m3u

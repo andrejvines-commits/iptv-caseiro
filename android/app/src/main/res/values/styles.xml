@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.IPTVCaseiro" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#E64B3C</item>
+        <item name="android:navigationBarColor">#101315</item>
+        <item name="android:statusBarColor">#101315</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

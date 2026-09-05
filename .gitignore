@@ -1,0 +1,17 @@
+.venv/
+.uv-cache/
+.grok-changes/
+.vscode/
+__pycache__/
+*.py[cod]
+database/*.db
+database/*.db-journal
+database/*.db-shm
+database/*.db-wal
+android/.gradle/
+android/local.properties
+android/release.keystore
+android/app/build/
+android/build/
+*.apk
+*.aab

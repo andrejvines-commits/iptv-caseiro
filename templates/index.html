@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Canais | IPTV Caseiro{% endblock %}
+{% block content %}
+{% macro channel_card(channel) %}
+  <article class="channel-card">
+    <div class="channel-visual">
+      {% if channel.logo %}
+        <img src="{{ channel.logo }}" alt="Logo de {{ channel.nome }}" loading="lazy">
+      {% else %}
+        <div class="channel-placeholder"><i class="bi bi-tv"></i></div>
+      {% endif %}
+      <span class="live-label">{{ 'ARQUIVO' if channel.tipo == 'arquivo' else ('LINK OFICIAL' if channel.tipo == 'externo' else 'AO VIVO') }}</span>
+    </div>
+    <div class="channel-info">
+      <p class="channel-category">{{ channel.categoria }}</p>
+      <h2>{{ channel.nome }}</h2>
+      <p class="channel-description">{{ channel.descricao }}</p>
+      <div class="channel-actions">
+        <a class="watch-button" href="{{ url_for('open_external_channel', channel_id=channel.id) if channel.tipo == 'externo' else url_for('player', channel_id=channel.id) }}" {{ 'target="_blank" rel="noopener noreferrer"'|safe if channel.tipo == 'externo' else '' }}>
+          <i class="bi {{ 'bi-box-arrow-up-right' if channel.tipo == 'externo' else 'bi-play-fill' }}"></i><span>{{ 'Abrir site' if channel.tipo == 'externo' else 'Assistir' }}</span>
+        </a>
+        <form method="post" action="{{ url_for('toggle_favorite', channel_id=channel.id) }}">
+          <input type="hidden" name="origem" value="catalogo">
+          {% if selected_category %}<input type="hidden" name="categoria" value="{{ selected_category }}">{% endif %}
+          {% if search %}<input type="hidden" name="q" value="{{ search }}">{% endif %}
+          {% if favorites_only %}<input type="hidden" name="favoritos" value="1">{% endif %}
+          <button class="card-favorite {{ 'is-favorite' if channel.favorito else '' }}" type="submit" title="{{ 'Remover dos favoritos' if channel.favorito else 'Adicionar aos favoritos' }}" aria-label="{{ 'Remover ' ~ channel.nome ~ ' dos favoritos' if channel.favorito else 'Adicionar ' ~ channel.nome ~ ' aos favoritos' }}">
+            <i class="bi {{ 'bi-star-fill' if channel.favorito else 'bi-star' }}"></i>
+          </button>
+        </form>
+      </div>
+    </div>
+  </article>
+{% endmacro %}
+<div class="app-shell">
+  <aside class="sidebar" aria-label="Categorias">
+    <p class="section-label">Categorias</p>
+    <a class="category-link {{ 'active' if not selected_category and not favorites_only else '' }}" href="{{ url_for('index', q=search) }}">
+      <i class="bi bi-collection-play"></i><span>Todos os canais</span>
+    </a>
+    <a class="category-link favorite-folder {{ 'active' if favorites_only else '' }}" href="{{ url_for('index', favoritos=1, q=search) }}">
+      <i class="bi bi-folder-star"></i><span>Favoritos</span><b>{{ favorite_count }}</b>
+    </a>
+    {% for category in categories %}
+      <a class="category-link {{ 'active' if selected_category == category and not favorites_only else '' }}" href="{{ url_for('index', categoria=category, q=search) }}">
+        <i class="bi bi-folder2"></i><span>{{ category }}</span>
+      </a>
+    {% endfor %}
+    <div class="sidebar-footer">
+      <span class="status-dot"></span>
+      <span>Servidor local</span>
+    </div>
+  </aside>
+
+  <main class="content">
+    <div class="content-heading">
+      <div>
+        <p class="eyebrow">Sua programação</p>
+        <h1>{{ 'Favoritos' if favorites_only else (selected_category or 'Todos os canais') }}</h1>
+      </div>
+      <form class="search" action="{{ url_for('index') }}" method="get" role="search">
+        {% if selected_category %}<input type="hidden" name="categoria" value="{{ selected_category }}">{% endif %}
+        {% if favorites_only %}<input type="hidden" name="favoritos" value="1">{% endif %}
+        <i class="bi bi-search"></i>
+        <input name="q" value="{{ search }}" type="search" placeholder="Pesquisar canais" aria-label="Pesquisar canais">
+      </form>
+    </div>
+
+    {% if favorite_channels %}
+      <section class="catalog-section" aria-labelledby="favorite-heading">
+        <div class="catalog-section-heading"><i class="bi bi-star-fill"></i><h2 id="favorite-heading">Favoritos</h2><span>{{ favorite_channels|length }}</span></div>
+        <div class="channel-grid">
+          {% for channel in favorite_channels %}{{ channel_card(channel) }}{% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if other_channels %}
+      <section class="catalog-section" aria-labelledby="other-heading">
+        <div class="catalog-section-heading"><i class="bi bi-collection-play"></i><h2 id="other-heading">Outros canais</h2><span>{{ other_channels|length }}</span></div>
+        <div class="channel-grid">
+          {% for channel in other_channels %}{{ channel_card(channel) }}{% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if not channels %}
+      <div class="empty-state">
+        <i class="bi {{ 'bi-star' if favorites_only else 'bi-search' }}"></i>
+        <h2>{{ 'Nenhum canal favorito' if favorites_only else 'Nenhum canal encontrado' }}</h2>
+        <p>{{ 'Use a estrela de um canal para adicioná-lo a esta pasta.' if favorites_only else 'Ajuste a pesquisa ou cadastre um canal na administração.' }}</p>
+        {% if favorites_only %}
+          <a class="secondary-button" href="{{ url_for('index') }}">Ver todos os canais</a>
+        {% else %}
+          <a class="secondary-button" href="{{ url_for('admin') }}">Administrar canais</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}
