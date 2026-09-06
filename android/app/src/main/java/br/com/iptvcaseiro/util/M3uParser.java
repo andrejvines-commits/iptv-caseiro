@@ -13,8 +13,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class M3uParser {
-    public static final int MAX_BYTES = 2 * 1024 * 1024;
-    public static final int MAX_CHANNELS = 500;
+    public static final int MAX_BYTES = 25 * 1024 * 1024;
+    public static final int MAX_CHANNELS = 10_000;
     private static final Pattern ATTRIBUTE = Pattern.compile("([\\w-]+)=\\\"([^\\\"]*)\\\"");
 
     private M3uParser() {}
@@ -27,13 +27,13 @@ public final class M3uParser {
             String line;
             while ((line = reader.readLine()) != null) {
                 bytes += line.getBytes(StandardCharsets.UTF_8).length + 1;
-                if (bytes > MAX_BYTES) throw new IOException("A playlist ultrapassa o limite de 2 MB.");
+                if (bytes > MAX_BYTES) throw new IOException("A playlist ultrapassa o limite de 25 MB.");
                 line = line.trim();
                 if (line.startsWith("#EXTINF:")) {
                     metadata = line;
                 } else if (!line.isEmpty() && !line.startsWith("#") && metadata != null) {
                     if (result.size() >= MAX_CHANNELS) {
-                        throw new IOException("A playlist ultrapassa o limite de 500 canais.");
+                        throw new IOException("A playlist ultrapassa o limite de 10.000 canais.");
                     }
                     if (line.startsWith("http://") || line.startsWith("https://")) {
                         result.add(from(metadata, line));

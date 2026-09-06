@@ -248,7 +248,7 @@ class MainActivity : ComponentActivity() {
                     Screen.EDIT -> EditorScreen(editingState.value)
                     Screen.IMPORT -> ImportScreen()
                     Screen.BACKUP -> BackupScreen()
-                    Screen.PLAYER -> if (playing != null) PlayerScreen(playing!!, channels.filter { it.active })
+                    Screen.PLAYER -> if (playing != null) PlayerScreen(playing!!, channels.filter { it.active && it.sourceType != "EXTERNAL" })
                 }
             }
         }
@@ -311,7 +311,10 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun ChannelCard(channel: Channel) {
         Card(
-            onClick = { playingState.value = channel; screenState.value = Screen.PLAYER },
+            onClick = {
+                if (channel.sourceType == "EXTERNAL") openExternalLink(channel.source)
+                else { playingState.value = channel; screenState.value = Screen.PLAYER }
+            },
             modifier = Modifier.fillMaxWidth().height(130.dp).focusable(),
         ) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -320,7 +323,14 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick = { toggleFavorite(channel) }) { Text(if (channel.favorite) "★" else "☆") }
                 }
                 Text(channel.category, color = MaterialTheme.colorScheme.secondary)
-                Text(if (channel.sourceType == "LOCAL") "Vídeo do aparelho" else redactSource(channel.source), maxLines = 1)
+                Text(
+                    when (channel.sourceType) {
+                        "LOCAL" -> "Vídeo do aparelho"
+                        "EXTERNAL" -> "Link externo · ${redactSource(channel.source)}"
+                        else -> redactSource(channel.source)
+                    },
+                    maxLines = 1,
+                )
             }
         }
     }
@@ -367,6 +377,7 @@ class MainActivity : ComponentActivity() {
         var category by remember(model.id, model.source) { mutableStateOf(model.category) }
         var logo by remember(model.id, model.source) { mutableStateOf(model.logoUrl) }
         var source by remember(model.id, model.source) { mutableStateOf(model.source) }
+        var sourceType by remember(model.id, model.source) { mutableStateOf(model.sourceType) }
         var reveal by rememberSaveable(model.id) { mutableStateOf(false) }
         var active by remember(model.id, model.source) { mutableStateOf(model.active) }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -376,11 +387,16 @@ class MainActivity : ComponentActivity() {
             OutlinedTextField(description, { description = it }, label = { Text("Descrição") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(logo, { logo = it }, label = { Text("URL do logotipo (opcional)") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(
-                source, { source = it }, label = { Text("URL do vídeo/stream") }, modifier = Modifier.fillMaxWidth(),
+                source, { source = it }, label = { Text(if (sourceType == "EXTERNAL") "Endereço do link externo" else "URL do vídeo/stream") }, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (!reveal && isSensitive(source)) PasswordVisualTransformation() else VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )
             if (isSensitive(source)) TextButton(onClick = { reveal = !reveal }) { Text(if (reveal) "Ocultar credenciais" else "Mostrar para editar") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = sourceType == "STREAM", onClick = { sourceType = "STREAM" }, label = { Text("Stream/vídeo") })
+                FilterChip(selected = sourceType == "EXTERNAL", onClick = { sourceType = "EXTERNAL" }, label = { Text("Link externo") })
+                if (sourceType == "LOCAL") FilterChip(selected = true, onClick = {}, label = { Text("Vídeo local") })
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(active, { active = it })
                 Text("Ativo")
@@ -396,7 +412,7 @@ class MainActivity : ComponentActivity() {
                     }
                     model.name = name.trim(); model.category = category.trim().ifBlank { "Sem categoria" }
                     model.description = description.trim(); model.logoUrl = logo.trim(); model.source = source.trim(); model.active = active
-                    if (!model.source.startsWith("content://")) model.sourceType = "STREAM"
+                    model.sourceType = if (model.source.startsWith("content://")) "LOCAL" else sourceType
                     saveChannel(model)
                 }) { Text("Salvar") }
                 OutlinedButton(onClick = { screenState.value = Screen.MANAGE }) { Text("Cancelar") }
@@ -410,7 +426,7 @@ class MainActivity : ComponentActivity() {
         var reveal by rememberSaveable { mutableStateOf(false) }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Importar playlist M3U", style = MaterialTheme.typography.headlineSmall)
-            Text("Até 2 MB e 500 canais. Canais repetidos são ignorados.")
+            Text("Até 25 MB e 10.000 canais. Canais repetidos são ignorados.")
             OutlinedTextField(
                 url, { url = it }, label = { Text("URL da playlist") }, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (!reveal && isSensitive(url)) PasswordVisualTransformation() else VisualTransformation.None,
@@ -574,12 +590,13 @@ class MainActivity : ComponentActivity() {
             var connection: HttpURLConnection? = null
             try {
                 connection = URL(value).openConnection() as HttpURLConnection
-                connection.connectTimeout = 15_000; connection.readTimeout = 20_000
+                connection.instanceFollowRedirects = true
+                connection.connectTimeout = 20_000; connection.readTimeout = 60_000
                 connection.setRequestProperty("User-Agent", "IPTV-Caseiro-Android")
                 val code = connection.responseCode
                 if (code !in 200..299) throw IllegalStateException("O servidor respondeu com o código $code.")
                 val declared = connection.contentLengthLong
-                if (declared > M3uParser.MAX_BYTES) throw IllegalStateException("A playlist ultrapassa o limite de 2 MB.")
+                if (declared > M3uParser.MAX_BYTES) throw IllegalStateException("A playlist ultrapassa o limite de 25 MB.")
                 importChannels(M3uParser.parse(connection.inputStream))
             } catch (error: Exception) {
                 showNotice(error.message ?: "Falha ao importar a playlist.")
@@ -589,8 +606,7 @@ class MainActivity : ComponentActivity() {
 
     private fun importChannels(channels: List<Channel>) {
         val dao = AppDatabase.get(this).channelDao()
-        var added = 0
-        channels.forEach { if (dao.insert(it) != -1L) added++ }
+        val added = dao.insertAll(channels).count { it != -1L }
         val duplicates = channels.size - added
         loadChannels { showNotice("Importação concluída: $added adicionados e $duplicates repetidos ignorados."); screenState.value = Screen.MANAGE }
     }
@@ -697,6 +713,11 @@ class MainActivity : ComponentActivity() {
     private fun openDownloadPage() {
         try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/${BuildConfig.GITHUB_REPOSITORY}/releases/latest"))) }
         catch (_: Exception) { showNotice("Nenhum aplicativo conseguiu abrir a página de download.") }
+    }
+
+    private fun openExternalLink(url: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        catch (_: Exception) { showNotice("Nenhum aplicativo conseguiu abrir este link.") }
     }
 
     private fun registerDownloadReceiver() {

@@ -17,6 +17,9 @@ public interface ChannelDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     long insert(Channel channel);
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    long[] insertAll(List<Channel> channels);
+
     @Update
     void update(Channel channel);
 
