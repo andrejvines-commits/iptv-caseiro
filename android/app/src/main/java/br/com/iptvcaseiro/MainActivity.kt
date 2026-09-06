@@ -19,6 +19,8 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,6 +30,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -380,7 +384,15 @@ class MainActivity : ComponentActivity() {
         var sourceType by remember(model.id, model.source) { mutableStateOf(model.sourceType) }
         var reveal by rememberSaveable(model.id) { mutableStateOf(false) }
         var active by remember(model.id, model.source) { mutableStateOf(model.active) }
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
             Text(if (model.id == 0L) "Novo conteúdo" else "Editar conteúdo", style = MaterialTheme.typography.headlineSmall)
             OutlinedTextField(name, { name = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(category, { category = it }, label = { Text("Categoria") }, modifier = Modifier.fillMaxWidth())
@@ -417,6 +429,7 @@ class MainActivity : ComponentActivity() {
                 }) { Text("Salvar") }
                 OutlinedButton(onClick = { screenState.value = Screen.MANAGE }) { Text("Cancelar") }
             }
+            Spacer(Modifier.height(24.dp))
         }
     }
 
