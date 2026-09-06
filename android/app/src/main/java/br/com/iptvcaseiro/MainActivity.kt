@@ -351,6 +351,9 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { editingState.value = Channel(); screenState.value = Screen.EDIT }) { Text("Novo") }
+                Button(onClick = { openExternalLinkEditor() }) { Text("Link externo") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { screenState.value = Screen.IMPORT }) { Text("Importar M3U") }
                 OutlinedButton(onClick = { screenState.value = Screen.BACKUP }) { Text("Backup") }
             }
@@ -399,7 +402,14 @@ class MainActivity : ComponentActivity() {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(if (model.id == 0L) "Novo conteúdo" else "Editar conteúdo", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                when {
+                    model.id != 0L -> "Editar conteúdo"
+                    model.sourceType == "EXTERNAL" -> "Novo link externo"
+                    else -> "Novo conteúdo"
+                },
+                style = MaterialTheme.typography.headlineSmall,
+            )
             OutlinedTextField(name, { name = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(category, { category = it }, label = { Text("Categoria") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(description, { description = it }, label = { Text("Descrição") }, modifier = Modifier.fillMaxWidth())
@@ -409,6 +419,9 @@ class MainActivity : ComponentActivity() {
                 visualTransformation = if (!reveal && isSensitive(source)) PasswordVisualTransformation() else VisualTransformation.None,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )
+            if (sourceType == "EXTERNAL") {
+                Text("O endereço será salvo sem download nem extração e abrirá no navegador.")
+            }
             if (isSensitive(source)) TextButton(onClick = { reveal = !reveal }) { Text(if (reveal) "Ocultar credenciais" else "Mostrar para editar") }
             Text("Tipo de conteúdo", fontWeight = FontWeight.Bold)
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -478,6 +491,12 @@ class MainActivity : ComponentActivity() {
                 Button(onClick = { previewFromUrl(url) }, enabled = !loading && (url.trim().startsWith("http://") || url.trim().startsWith("https://"))) { Text("Buscar canais") }
                 OutlinedButton(enabled = !loading, onClick = { playlistPicker.launch(arrayOf("audio/x-mpegurl", "application/x-mpegURL", "text/plain", "*/*")) }) { Text("Escolher arquivo") }
             }
+            OutlinedButton(
+                enabled = !loading && (url.trim().startsWith("http://") || url.trim().startsWith("https://")),
+                onClick = { openExternalLinkEditor(url) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Usar como link externo (sem baixar)") }
+            Text("Importar M3U extrai os canais. Link externo apenas guarda o endereço e o abre no navegador.")
             if (loading) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text("Extraindo canais…")
@@ -625,6 +644,16 @@ class MainActivity : ComponentActivity() {
             val rows = AppDatabase.get(this).channelDao().all()
             runOnUiThread { channelsState.value = rows; after?.invoke() }
         }
+    }
+
+    private fun openExternalLinkEditor(value: String = "") {
+        editingState.value = Channel().apply {
+            name = if (value.isBlank()) "" else "Link externo"
+            category = "Links externos"
+            sourceType = "EXTERNAL"
+            source = value.trim()
+        }
+        screenState.value = Screen.EDIT
     }
 
     private fun saveChannel(channel: Channel) {
