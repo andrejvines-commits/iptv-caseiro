@@ -404,10 +404,28 @@ class MainActivity : ComponentActivity() {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )
             if (isSensitive(source)) TextButton(onClick = { reveal = !reveal }) { Text(if (reveal) "Ocultar credenciais" else "Mostrar para editar") }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = sourceType == "STREAM", onClick = { sourceType = "STREAM" }, label = { Text("Stream/vídeo") })
-                FilterChip(selected = sourceType == "EXTERNAL", onClick = { sourceType = "EXTERNAL" }, label = { Text("Link externo") })
-                if (sourceType == "LOCAL") FilterChip(selected = true, onClick = {}, label = { Text("Vídeo local") })
+            Text("Tipo de conteúdo", fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(
+                    selected = sourceType == "STREAM",
+                    onClick = { sourceType = "STREAM" },
+                    label = { Text("Stream ou vídeo online — reproduzir no aplicativo") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                FilterChip(
+                    selected = sourceType == "EXTERNAL",
+                    onClick = { sourceType = "EXTERNAL" },
+                    label = { Text("Link externo — abrir no navegador") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (sourceType == "LOCAL") {
+                    FilterChip(
+                        selected = true,
+                        onClick = {},
+                        label = { Text("Vídeo local — arquivo do aparelho") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(active, { active = it })
@@ -429,6 +447,7 @@ class MainActivity : ComponentActivity() {
                 }) { Text("Salvar") }
                 OutlinedButton(onClick = { screenState.value = Screen.MANAGE }) { Text("Cancelar") }
             }
+            Text("Versão instalada: ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(24.dp))
         }
     }
