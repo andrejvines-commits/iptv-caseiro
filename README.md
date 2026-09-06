@@ -77,7 +77,17 @@ Arquivos locais são servidos apenas da pasta `videos`, com nomes e extensões v
 
 FFmpeg não é necessário para MP4 compatível com o navegador. Futuras funções de conversão poderão usá-lo, mas nenhum comando fornecido pelo navegador é executado no sistema.
 
-## Aplicativo Android e página de instalação
+## Aplicativo Android 2.0 autônomo
+
+O diretório `android/` agora contém um aplicativo nativo em Kotlin e Jetpack Compose. Ele não usa WebView, Flask nem o computador: os canais ficam no próprio aparelho em um banco Room e são reproduzidos pelo Media3 ExoPlayer.
+
+O catálogo começa vazio. Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, escolher vídeos com o seletor seguro do Android, importar playlists M3U por URL ou arquivo, editar, favoritar, ativar e excluir vários itens. URLs privadas ficam armazenadas somente na área interna do aplicativo e aparecem ocultadas na interface.
+
+O aplicativo também oferece pesquisa, categorias, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha. A reprodução é pausada quando o aplicativo sai do primeiro plano.
+
+O botão **Atualizar** consulta a última GitHub Release e sempre apresenta o resultado. Também há uma verificação silenciosa ao abrir, limitada a uma vez por dia. O pacote `br.com.iptvcaseiro` e a chave de assinatura permanecem os mesmos para permitir atualização sobre a versão 1.0.1.
+
+### Aplicativo Android legado 1.x e página de instalação
 
 O diretório `android/` contém um aplicativo Android que exibe este sistema em uma WebView. No primeiro uso, ele pede o endereço mostrado pelo Flask, por exemplo `http://192.168.1.20:5000`. O computador e o Android precisam estar na mesma rede, exceto quando o Flask estiver hospedado em um servidor HTTPS próprio.
 
