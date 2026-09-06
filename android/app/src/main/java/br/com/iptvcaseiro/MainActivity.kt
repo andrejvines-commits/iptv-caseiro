@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -48,6 +49,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -127,6 +129,8 @@ class MainActivity : ComponentActivity() {
     private val noticeState = mutableStateOf<String?>(null)
     private val updateState = mutableStateOf<UpdateState>(UpdateState.Hidden)
     private val passwordActionState = mutableStateOf<PasswordAction?>(null)
+    private val playlistPreviewState = mutableStateOf<List<Channel>>(emptyList())
+    private val playlistLoadingState = mutableStateOf(false)
     private var checkingUpdates = false
     private var activePlayer: ExoPlayer? = null
     private var pendingApk: File? = null
@@ -186,13 +190,15 @@ class MainActivity : ComponentActivity() {
         playlistPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
                 persistReadPermission(uri)
+                playlistLoadingState.value = true
                 executor.execute {
                     try {
                         contentResolver.openInputStream(uri).use { input ->
                             requireNotNull(input) { "Não foi possível abrir o arquivo." }
-                            importChannels(M3uParser.parse(input))
+                            showPlaylistPreview(M3uParser.parse(input))
                         }
                     } catch (error: Exception) {
+                        runOnUiThread { playlistLoadingState.value = false }
                         showNotice(error.message ?: "Falha ao importar a playlist.")
                     }
                 }
@@ -456,9 +462,12 @@ class MainActivity : ComponentActivity() {
     private fun ImportScreen() {
         var url by rememberSaveable { mutableStateOf("") }
         var reveal by rememberSaveable { mutableStateOf(false) }
+        val preview by playlistPreviewState
+        val loading by playlistLoadingState
+        var selected by remember(preview) { mutableStateOf(preview.indices.toSet()) }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Importar playlist M3U", style = MaterialTheme.typography.headlineSmall)
-            Text("Até 25 MB e 10.000 canais. Canais repetidos são ignorados.")
+            Text("A lista e as credenciais ficam somente neste aparelho.")
             OutlinedTextField(
                 url, { url = it }, label = { Text("URL da playlist") }, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (!reveal && isSensitive(url)) PasswordVisualTransformation() else VisualTransformation.None,
@@ -466,8 +475,37 @@ class MainActivity : ComponentActivity() {
             )
             if (isSensitive(url)) TextButton(onClick = { reveal = !reveal }) { Text(if (reveal) "Ocultar credenciais" else "Mostrar para editar") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { importFromUrl(url) }, enabled = url.startsWith("http://") || url.startsWith("https://")) { Text("Importar URL") }
-                OutlinedButton(onClick = { playlistPicker.launch(arrayOf("audio/x-mpegurl", "application/x-mpegURL", "text/plain", "*/*")) }) { Text("Escolher arquivo") }
+                Button(onClick = { previewFromUrl(url) }, enabled = !loading && (url.trim().startsWith("http://") || url.trim().startsWith("https://"))) { Text("Buscar canais") }
+                OutlinedButton(enabled = !loading, onClick = { playlistPicker.launch(arrayOf("audio/x-mpegurl", "application/x-mpegURL", "text/plain", "*/*")) }) { Text("Escolher arquivo") }
+            }
+            if (loading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text("Extraindo canais…")
+            }
+            if (preview.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = selected.size == preview.size, onCheckedChange = { all -> selected = if (all) preview.indices.toSet() else emptySet() })
+                    Text("Selecionar todos", modifier = Modifier.weight(1f))
+                    Text("${preview.size} encontrados")
+                }
+                Button(
+                    enabled = selected.isNotEmpty(),
+                    onClick = { importChannels(preview.filterIndexed { index, _ -> index in selected }) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Importar ${selected.size} selecionados") }
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(preview, key = { index, channel -> "${channel.source}-$index" }) { index, channel ->
+                        Card(Modifier.fillMaxWidth().clickable { selected = if (index in selected) selected - index else selected + index }) {
+                            Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = index in selected, onCheckedChange = { checked -> selected = if (checked) selected + index else selected - index })
+                                Column(Modifier.weight(1f)) {
+                                    Text(channel.name, fontWeight = FontWeight.Bold, maxLines = 1)
+                                    Text(channel.category, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -616,31 +654,45 @@ class MainActivity : ComponentActivity() {
         executor.execute { AppDatabase.get(this).channelDao().deleteIds(ids.toList()); loadChannels() }
     }
 
-    private fun importFromUrl(value: String) {
-        if (!value.startsWith("http://") && !value.startsWith("https://")) { showNotice("Informe uma URL HTTP ou HTTPS válida."); return }
+    private fun previewFromUrl(value: String) {
+        val normalized = value.trim()
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) { showNotice("Informe uma URL HTTP ou HTTPS válida."); return }
+        playlistLoadingState.value = true
+        playlistPreviewState.value = emptyList()
         executor.execute {
             var connection: HttpURLConnection? = null
             try {
-                connection = URL(value).openConnection() as HttpURLConnection
+                connection = URL(normalized).openConnection() as HttpURLConnection
                 connection.instanceFollowRedirects = true
                 connection.connectTimeout = 20_000; connection.readTimeout = 60_000
-                connection.setRequestProperty("User-Agent", "IPTV-Caseiro-Android")
+                connection.setRequestProperty("User-Agent", "IPTV-Caseiro/1.0")
+                connection.setRequestProperty("Accept", "application/x-mpegURL, audio/x-mpegurl, text/plain, */*")
                 val code = connection.responseCode
                 if (code !in 200..299) throw IllegalStateException("O servidor respondeu com o código $code.")
                 val declared = connection.contentLengthLong
-                if (declared > M3uParser.MAX_BYTES) throw IllegalStateException("A playlist ultrapassa o limite de 25 MB.")
-                importChannels(M3uParser.parse(connection.inputStream))
+                if (declared > M3uParser.MAX_BYTES) throw IllegalStateException("A playlist ultrapassa o limite de 50 MB.")
+                showPlaylistPreview(M3uParser.parse(connection.inputStream))
             } catch (error: Exception) {
+                runOnUiThread { playlistLoadingState.value = false }
                 showNotice(error.message ?: "Falha ao importar a playlist.")
             } finally { connection?.disconnect() }
         }
+    }
+
+    private fun showPlaylistPreview(channels: List<Channel>) = runOnUiThread {
+        playlistPreviewState.value = channels
+        playlistLoadingState.value = false
     }
 
     private fun importChannels(channels: List<Channel>) {
         val dao = AppDatabase.get(this).channelDao()
         val added = dao.insertAll(channels).count { it != -1L }
         val duplicates = channels.size - added
-        loadChannels { showNotice("Importação concluída: $added adicionados e $duplicates repetidos ignorados."); screenState.value = Screen.MANAGE }
+        loadChannels {
+            playlistPreviewState.value = emptyList()
+            showNotice("Importação concluída: $added adicionados e $duplicates repetidos ignorados.")
+            screenState.value = Screen.MANAGE
+        }
     }
 
     private fun exportBackup(uri: Uri, password: CharArray) {

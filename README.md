@@ -81,7 +81,7 @@ FFmpeg não é necessário para MP4 compatível com o navegador. Futuras funçõ
 
 O diretório `android/` agora contém um aplicativo nativo em Kotlin e Jetpack Compose. Ele não usa WebView, Flask nem o computador: os canais ficam no próprio aparelho em um banco Room e são reproduzidos pelo Media3 ExoPlayer.
 
-O catálogo começa vazio. Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, links externos, escolher vídeos com o seletor seguro do Android, importar playlists M3U por URL ou arquivo, editar, favoritar, ativar e excluir vários itens. URLs privadas ficam armazenadas somente na área interna do aplicativo e aparecem ocultadas na interface. A importação aceita até 25 MB e 10.000 canais por playlist.
+O catálogo começa vazio. Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, links externos, escolher vídeos com o seletor seguro do Android, importar playlists M3U por URL ou arquivo, editar, favoritar, ativar e excluir vários itens. URLs privadas ficam armazenadas somente na área interna do aplicativo e aparecem ocultadas na interface. A importação mostra uma prévia selecionável e aceita até 50 MB e 50.000 canais por playlist.
 
 O aplicativo também oferece pesquisa, categorias, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha. A reprodução é pausada quando o aplicativo sai do primeiro plano.
 

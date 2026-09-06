@@ -23,4 +23,13 @@ public class M3uParserTest {
     public void rejectsPlaylistWithoutPlayableUrls() throws Exception {
         M3uParser.parse(new ByteArrayInputStream("#EXTM3U\n#EXTINF:-1,Inválido\nfile:///video.mp4".getBytes(StandardCharsets.UTF_8)));
     }
+
+    @Test public void acceptsLatin1AndSkipsDuplicateSources() throws Exception {
+        String content = "#EXTM3U\n#EXTINF:-1 group-title=\"Notícias\",Televisão\nhttps://example.test/live\n" +
+            "#EXTINF:-1,Repetido\nhttps://example.test/live\n";
+        List<Channel> channels = M3uParser.parse(new ByteArrayInputStream(content.getBytes(StandardCharsets.ISO_8859_1)));
+        assertEquals(1, channels.size());
+        assertEquals("Televisão", channels.get(0).name);
+        assertEquals("Notícias", channels.get(0).category);
+    }
 }
