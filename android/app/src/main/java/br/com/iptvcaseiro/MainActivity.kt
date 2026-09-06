@@ -776,17 +776,23 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private fun isSensitive(value: String): Boolean {
-    val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return false
-    return !uri.userInfo.isNullOrBlank() || uri.queryParameterNames.any { it.lowercase() in setOf("token", "key", "password", "pass", "username", "user", "auth") }
+internal fun isSensitive(value: String): Boolean {
+    val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return false
+    if (uri.isOpaque) return false
+    val privateNames = setOf("token", "key", "password", "pass", "username", "user", "auth")
+    val hasPrivateQuery = uri.rawQuery.orEmpty().split('&').any { parameter ->
+        parameter.substringBefore('=').lowercase() in privateNames
+    }
+    return !uri.rawUserInfo.isNullOrBlank() || hasPrivateQuery
 }
 
-private fun redactSource(value: String): String {
+internal fun redactSource(value: String): String {
     if (value.startsWith("content://")) return "Arquivo local protegido"
-    val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return "Origem protegida"
+    val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return "Origem protegida"
+    if (uri.isOpaque) return value
     if (!isSensitive(value)) return value
     val port = if (uri.port > 0) ":${uri.port}" else ""
-    return "${uri.scheme ?: "https"}://${uri.host ?: "origem"}$port${uri.path ?: ""}?…"
+    return "${uri.scheme ?: "https"}://${uri.host ?: "origem"}$port${uri.rawPath ?: ""}?…"
 }
 
 @Composable
