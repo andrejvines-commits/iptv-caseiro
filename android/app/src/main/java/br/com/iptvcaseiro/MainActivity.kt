@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.database.Cursor
+import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
@@ -140,6 +141,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var localVideoPicker: ActivityResultLauncher<Array<String>>
     private lateinit var playlistPicker: ActivityResultLauncher<Array<String>>
+    private lateinit var pcDatabasePicker: ActivityResultLauncher<Array<String>>
     private lateinit var backupCreator: ActivityResultLauncher<String>
     private lateinit var backupPicker: ActivityResultLauncher<Array<String>>
 
@@ -203,6 +205,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+        pcDatabasePicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importPcDatabase(uri)
         }
         backupCreator = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
             val password = exportPassword
@@ -531,11 +536,19 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun BackupScreen() {
-        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).navigationBarsPadding().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
             Text("Backup criptografado", style = MaterialTheme.typography.headlineSmall)
             Text("O arquivo usa AES-256-GCM e só pode ser restaurado com a senha. A senha não é salva.")
             Button(onClick = { passwordActionState.value = PasswordAction.Export }) { Text("Criar backup") }
             OutlinedButton(onClick = { backupPicker.launch(arrayOf("application/octet-stream", "*/*")) }) { Text("Restaurar backup") }
+            Text("Transferir catálogo do computador", style = MaterialTheme.typography.titleMedium)
+            Text("Escolha uma cópia do arquivo database/banco.db do IPTV Caseiro. Streams e links externos serão importados sem consultar seus servidores.")
+            OutlinedButton(onClick = { pcDatabasePicker.launch(arrayOf("application/vnd.sqlite3", "application/octet-stream", "*/*")) }) {
+                Text("Importar banco do computador")
+            }
             Text("Vídeos locais continuam protegidos pelo Android. Em outro aparelho, talvez seja necessário selecioná-los novamente.")
         }
     }
@@ -721,6 +734,72 @@ class MainActivity : ComponentActivity() {
             playlistPreviewState.value = emptyList()
             showNotice("Importação concluída: $added adicionados e $duplicates repetidos ignorados.")
             screenState.value = Screen.MANAGE
+        }
+    }
+
+    private fun importPcDatabase(uri: Uri) {
+        executor.execute {
+            val temporary = File(cacheDir, "pc-catalog-import.db")
+            try {
+                contentResolver.openInputStream(uri).use { input ->
+                    requireNotNull(input) { "Não foi possível abrir o banco do computador." }
+                    temporary.outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            total += read
+                            if (total > 100L * 1024L * 1024L) throw IllegalStateException("O banco ultrapassa o limite de 100 MB.")
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                }
+
+                val imported = mutableListOf<Channel>()
+                var localVideos = 0
+                SQLiteDatabase.openDatabase(temporary.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { database ->
+                    database.rawQuery(
+                        "SELECT nome, descricao, categoria, logo, tipo, fonte, ativo, favorito FROM canais ORDER BY id",
+                        null,
+                    ).use { cursor ->
+                        while (cursor.moveToNext()) {
+                            if (imported.size >= M3uParser.MAX_CHANNELS) throw IllegalStateException("O banco contém canais demais.")
+                            val source = cursor.getString(5)?.trim().orEmpty()
+                            if (source.isBlank()) continue
+                            val sourceType = when (cursor.getString(4)?.lowercase()) {
+                                "stream" -> "STREAM"
+                                "externo" -> "EXTERNAL"
+                                "arquivo" -> "LOCAL"
+                                else -> continue
+                            }
+                            if (sourceType == "LOCAL") localVideos++
+                            imported += Channel().apply {
+                                name = cursor.getString(0)?.trim().orEmpty().ifBlank { "Conteúdo sem nome" }.take(120)
+                                description = cursor.getString(1)?.trim().orEmpty().take(500)
+                                category = cursor.getString(2)?.trim().orEmpty().ifBlank { "Sem categoria" }.take(80)
+                                logoUrl = cursor.getString(3)?.trim().orEmpty()
+                                this.sourceType = sourceType
+                                this.source = source
+                                active = cursor.getInt(6) != 0 && sourceType != "LOCAL"
+                                favorite = cursor.getInt(7) != 0
+                            }
+                        }
+                    }
+                }
+                if (imported.isEmpty()) throw IllegalStateException("O banco do computador não contém canais compatíveis.")
+                val added = AppDatabase.get(this).channelDao().insertAll(imported).count { it != -1L }
+                val duplicates = imported.size - added
+                loadChannels {
+                    val localWarning = if (localVideos > 0) " $localVideos vídeos locais ficaram inativos e precisam ser escolhidos novamente." else ""
+                    showNotice("Transferência concluída: $added adicionados e $duplicates repetidos ignorados.$localWarning")
+                    screenState.value = Screen.MANAGE
+                }
+            } catch (error: Exception) {
+                showNotice(error.message ?: "Não foi possível importar o banco do computador.")
+            } finally {
+                temporary.delete()
+            }
         }
     }
 
