@@ -81,7 +81,9 @@ FFmpeg não é necessário para MP4 compatível com o navegador. Futuras funçõ
 
 O diretório `android/` agora contém um aplicativo nativo em Kotlin e Jetpack Compose. Ele não usa WebView, Flask nem o computador: os canais ficam no próprio aparelho em um banco Room e são reproduzidos pelo Media3 ExoPlayer.
 
-O catálogo começa vazio. Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, links externos, escolher vídeos com o seletor seguro do Android, importar playlists M3U por URL ou arquivo, editar, favoritar, ativar e excluir vários itens. URLs privadas ficam armazenadas somente na área interna do aplicativo e aparecem ocultadas na interface. A importação mostra uma prévia selecionável e aceita até 50 MB e 50.000 canais por playlist. Em **Backup**, a opção **Importar banco do computador** transfere diretamente os streams e links externos do arquivo local `database/banco.db`, sem consultar os servidores dos canais.
+Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, links externos, escolher vídeos com o seletor seguro do Android, importar playlists M3U por URL ou arquivo, editar, favoritar, ativar e excluir vários itens. URLs privadas ficam armazenadas somente na área interna do aplicativo e aparecem ocultadas na interface. A importação mostra uma prévia selecionável e aceita até 50 MB e 50.000 canais por playlist. Em **Backup**, a opção **Importar banco do computador** transfere diretamente os streams e links externos do arquivo local `database/banco.db`, sem consultar os servidores dos canais.
+
+A versão 2.0.8 inclui um catálogo privado criptografado com AES-256-GCM. Na primeira abertura, o aplicativo exige a senha definida fora do código-fonte para descriptografar e importar esse catálogo. A senha não é armazenada no APK nem no repositório.
 
 O aplicativo também oferece pesquisa, categorias, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha. A reprodução é pausada quando o aplicativo sai do primeiro plano.
 

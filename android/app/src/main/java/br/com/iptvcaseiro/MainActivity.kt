@@ -103,6 +103,8 @@ import java.util.concurrent.Executors
 private const val APK_NAME = "iptv-caseiro.apk"
 private const val PREFS = "iptv_caseiro"
 private const val UPDATE_CHECKED_AT = "update_checked_at"
+private const val BUNDLED_CATALOG_ASSET = "bundled-catalog.iptvbak"
+private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_1"
 private const val DAY_MS = 24L * 60L * 60L * 1000L
 
 private enum class Screen { HOME, MANAGE, EDIT, IMPORT, BACKUP, PLAYER }
@@ -132,6 +134,9 @@ class MainActivity : ComponentActivity() {
     private val passwordActionState = mutableStateOf<PasswordAction?>(null)
     private val playlistPreviewState = mutableStateOf<List<Channel>>(emptyList())
     private val playlistLoadingState = mutableStateOf(false)
+    private val bundledCatalogLockedState = mutableStateOf(true)
+    private val bundledCatalogLoadingState = mutableStateOf(false)
+    private val bundledCatalogErrorState = mutableStateOf<String?>(null)
     private var checkingUpdates = false
     private var activePlayer: ExoPlayer? = null
     private var pendingApk: File? = null
@@ -161,7 +166,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit().remove("server_url").apply()
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        prefs.edit().remove("server_url").apply()
+        bundledCatalogLockedState.value = !prefs.getBoolean(BUNDLED_CATALOG_UNLOCKED, false)
         registerLaunchers()
         registerDownloadReceiver()
         loadChannels()
@@ -170,7 +177,6 @@ class MainActivity : ComponentActivity() {
                 IptvApp()
             }
         }
-        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         if (System.currentTimeMillis() - prefs.getLong(UPDATE_CHECKED_AT, 0L) >= DAY_MS) {
             prefs.edit().putLong(UPDATE_CHECKED_AT, System.currentTimeMillis()).apply()
             checkForUpdates(manual = false)
@@ -277,6 +283,7 @@ class MainActivity : ComponentActivity() {
         }
         UpdateDialog(updateState.value)
         passwordActionState.value?.let { PasswordDialog(it) }
+        if (bundledCatalogLockedState.value) BundledCatalogDialog()
     }
 
     @Composable
@@ -584,6 +591,43 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun BundledCatalogDialog() {
+        var password by rememberSaveable { mutableStateOf("") }
+        val loading by bundledCatalogLoadingState
+        val error by bundledCatalogErrorState
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Desbloquear catálogo") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Esta versão contém um catálogo privado criptografado. Informe a senha para liberar os canais neste aparelho.")
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it; bundledCatalogErrorState.value = null },
+                        label = { Text("Senha") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        singleLine = true,
+                        enabled = !loading,
+                    )
+                    if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = password.isNotBlank() && !loading,
+                    onClick = {
+                        val chars = password.toCharArray()
+                        password = ""
+                        unlockBundledCatalog(chars)
+                    },
+                ) { Text(if (loading) "Desbloqueando…" else "Desbloquear") }
+            },
+        )
+    }
+
+    @Composable
     private fun PlayerScreen(channel: Channel, playable: List<Channel>) {
         val context = LocalContext.current
         val player = remember(channel.id, channel.source) {
@@ -799,6 +843,51 @@ class MainActivity : ComponentActivity() {
                 showNotice(error.message ?: "Não foi possível importar o banco do computador.")
             } finally {
                 temporary.delete()
+            }
+        }
+    }
+
+    private fun unlockBundledCatalog(password: CharArray) {
+        if (bundledCatalogLoadingState.value) {
+            password.fill('\u0000')
+            return
+        }
+        bundledCatalogLoadingState.value = true
+        bundledCatalogErrorState.value = null
+        executor.execute {
+            try {
+                val encrypted = assets.open(BUNDLED_CATALOG_ASSET).use { input ->
+                    val bytes = input.readBytes()
+                    if (bytes.size > 8 * 1024 * 1024) throw IllegalStateException("O catálogo incluído ultrapassa o limite permitido.")
+                    bytes
+                }
+                val plain = BackupCrypto.decrypt(encrypted, password)
+                val root = JSONObject(String(plain, StandardCharsets.UTF_8))
+                if (root.optInt("format") != 1) throw IllegalStateException("O catálogo incluído possui formato incompatível.")
+                val array = root.getJSONArray("channels")
+                if (array.length() > M3uParser.MAX_CHANNELS) throw IllegalStateException("O catálogo incluído contém canais demais.")
+                val channels = ArrayList<Channel>(array.length())
+                for (index in 0 until array.length()) channels += channelFromJson(array.getJSONObject(index))
+                val added = AppDatabase.get(this).channelDao().insertAll(channels).count { it != -1L }
+                val duplicates = channels.size - added
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(BUNDLED_CATALOG_UNLOCKED, true).apply()
+                loadChannels {
+                    bundledCatalogLoadingState.value = false
+                    bundledCatalogLockedState.value = false
+                    showNotice("Catálogo desbloqueado: $added canais adicionados e $duplicates repetidos ignorados.")
+                }
+            } catch (_: javax.crypto.AEADBadTagException) {
+                runOnUiThread {
+                    bundledCatalogLoadingState.value = false
+                    bundledCatalogErrorState.value = "Senha incorreta. Tente novamente."
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    bundledCatalogLoadingState.value = false
+                    bundledCatalogErrorState.value = "Não foi possível desbloquear o catálogo incluído."
+                }
+            } finally {
+                password.fill('\u0000')
             }
         }
     }
