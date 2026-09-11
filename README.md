@@ -85,7 +85,7 @@ Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, links externos, escol
 
 A versão 2.0.8 inclui um catálogo privado criptografado com AES-256-GCM. Na primeira abertura, o aplicativo exige a senha definida fora do código-fonte para descriptografar e importar esse catálogo. A senha não é armazenada no APK nem no repositório.
 
-O aplicativo também oferece pesquisa, categorias, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha. A reprodução é pausada quando o aplicativo sai do primeiro plano.
+O aplicativo também oferece pesquisa e pastas de categorias visíveis e clicáveis, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha. A reprodução é pausada quando o aplicativo sai do primeiro plano.
 
 O botão **Atualizar** consulta a última GitHub Release e sempre apresenta o resultado. Também há uma verificação silenciosa ao abrir, limitada a uma vez por dia. O pacote `br.com.iptvcaseiro` e a chave de assinatura permanecem os mesmos para permitir atualização sobre a versão 1.0.1.
 

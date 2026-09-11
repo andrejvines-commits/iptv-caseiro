@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -291,7 +292,9 @@ class MainActivity : ComponentActivity() {
         var query by rememberSaveable { mutableStateOf("") }
         var favoritesOnly by rememberSaveable { mutableStateOf(false) }
         var category by rememberSaveable { mutableStateOf("Todos") }
-        val categories = remember(channels) { listOf("Todos") + channels.filter { it.active }.map { it.category }.distinct().sorted() }
+        val categories = remember(channels) {
+            listOf("Todos") + channels.filter { it.active }.map { it.category }.filterNot { it.equals("Todos", true) }.distinct().sorted()
+        }
         val filtered = channels.filter {
             it.active && (!favoritesOnly || it.favorite) &&
                 (category == "Todos" || it.category == category) &&
@@ -299,12 +302,17 @@ class MainActivity : ComponentActivity() {
         }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(query, { query = it }, label = { Text("Pesquisar canais") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(selected = favoritesOnly, onClick = { favoritesOnly = !favoritesOnly }, label = { Text("Favoritos") })
-                OutlinedButton(onClick = {
-                    val index = categories.indexOf(category).let { if (it < 0) 0 else it }
-                    category = categories[(index + 1) % categories.size]
-                }) { Text(category) }
+            FilterChip(selected = favoritesOnly, onClick = { favoritesOnly = !favoritesOnly }, label = { Text("★ Favoritos") })
+            Text("Pastas", fontWeight = FontWeight.Bold)
+            LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(categories, key = { it }) { folder ->
+                    val count = if (folder == "Todos") channels.count { it.active } else channels.count { it.active && it.category == folder }
+                    FilterChip(
+                        selected = category == folder,
+                        onClick = { category = folder },
+                        label = { Text(if (folder == "Todos") "Todos ($count)" else "📁 $folder ($count)") },
+                    )
+                }
             }
             if (filtered.isEmpty()) {
                 EmptyCatalog(onManage = { screenState.value = Screen.MANAGE })
