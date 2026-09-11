@@ -93,9 +93,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
+import java.net.URI
+import java.net.URLDecoder
+import java.net.URLEncoder
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ExecutorService
@@ -108,7 +112,9 @@ private const val BUNDLED_CATALOG_ASSET = "bundled-catalog.iptvbak"
 private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_2"
 private const val DAY_MS = 24L * 60L * 60L * 1000L
 
-private enum class Screen { HOME, MANAGE, EDIT, IMPORT, BACKUP, PLAYER }
+private enum class Screen { HOME, MANAGE, EDIT, IMPORT, BACKUP, SERIES, PLAYER }
+
+private data class XtreamAccess(val root: String, val username: String, val password: String)
 
 private sealed interface UpdateState {
     data object Hidden : UpdateState
@@ -138,6 +144,11 @@ class MainActivity : ComponentActivity() {
     private val bundledCatalogLockedState = mutableStateOf(true)
     private val bundledCatalogLoadingState = mutableStateOf(false)
     private val bundledCatalogErrorState = mutableStateOf<String?>(null)
+    private val seriesState = mutableStateOf<Channel?>(null)
+    private val seriesEpisodesState = mutableStateOf<List<Channel>>(emptyList())
+    private val seriesLoadingState = mutableStateOf(false)
+    private val seriesErrorState = mutableStateOf<String?>(null)
+    private val playerReturnScreenState = mutableStateOf(Screen.HOME)
     private var checkingUpdates = false
     private var activePlayer: ExoPlayer? = null
     private var pendingApk: File? = null
@@ -243,7 +254,8 @@ class MainActivity : ComponentActivity() {
         BackHandler(enabled = screen != Screen.HOME) {
             screenState.value = when (screen) {
                 Screen.MANAGE -> Screen.HOME
-                Screen.PLAYER -> Screen.HOME
+                Screen.PLAYER -> playerReturnScreenState.value
+                Screen.SERIES -> Screen.HOME
                 else -> Screen.MANAGE
             }
         }
@@ -270,7 +282,12 @@ class MainActivity : ComponentActivity() {
                     Screen.EDIT -> EditorScreen(editingState.value)
                     Screen.IMPORT -> ImportScreen()
                     Screen.BACKUP -> BackupScreen()
-                    Screen.PLAYER -> if (playing != null) PlayerScreen(playing!!, channels.filter { it.active && it.sourceType != "EXTERNAL" })
+                    Screen.SERIES -> seriesState.value?.let { SeriesScreen(it) }
+                    Screen.PLAYER -> if (playing != null) {
+                        val episodes = seriesEpisodesState.value
+                        val playable = if (episodes.any { it.source == playing!!.source }) episodes else channels.filter { it.active && it.sourceType !in setOf("EXTERNAL", "SERIES") }
+                        PlayerScreen(playing!!, playable)
+                    }
                 }
             }
         }
@@ -292,11 +309,13 @@ class MainActivity : ComponentActivity() {
         var query by rememberSaveable { mutableStateOf("") }
         var favoritesOnly by rememberSaveable { mutableStateOf(false) }
         var category by rememberSaveable { mutableStateOf("Todos") }
-        val categories = remember(channels) {
-            listOf("Todos") + channels.filter { it.active }.map { it.category }.filterNot { it.equals("Todos", true) }.distinct().sorted()
+        val activeChannels = remember(channels) { channels.filter { it.active } }
+        val categoryCounts = remember(activeChannels) { activeChannels.groupingBy { it.category }.eachCount() }
+        val categories = remember(categoryCounts) {
+            listOf("Todos") + categoryCounts.keys.filterNot { it.equals("Todos", true) }.sorted()
         }
-        val filtered = channels.filter {
-            it.active && (!favoritesOnly || it.favorite) &&
+        val filtered = activeChannels.filter {
+            (!favoritesOnly || it.favorite) &&
                 (category == "Todos" || it.category == category) &&
                 (query.isBlank() || it.name.contains(query, true) || it.category.contains(query, true))
         }
@@ -319,7 +338,7 @@ class MainActivity : ComponentActivity() {
                         )
                         LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             items(categories, key = { it }) { folder ->
-                                val count = if (folder == "Todos") channels.count { it.active } else channels.count { it.active && it.category == folder }
+                                val count = if (folder == "Todos") activeChannels.size else categoryCounts[folder] ?: 0
                                 FilterChip(
                                     selected = category == folder,
                                     onClick = { category = folder },
@@ -331,7 +350,7 @@ class MainActivity : ComponentActivity() {
                     }
                     if (filtered.isEmpty()) {
                         Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                            Text(if (channels.none { it.active }) "Seu catálogo está vazio" else "Nenhum canal encontrado nesta pasta.")
+                            Text(if (activeChannels.isEmpty()) "Seu catálogo está vazio" else "Nenhum canal encontrado nesta pasta.")
                         }
                     } else {
                         val minimum = if (availableWidth >= 900.dp) 240.dp else 160.dp
@@ -364,8 +383,15 @@ class MainActivity : ComponentActivity() {
     private fun ChannelCard(channel: Channel) {
         Card(
             onClick = {
-                if (channel.sourceType == "EXTERNAL") openExternalLink(channel.source)
-                else { playingState.value = channel; screenState.value = Screen.PLAYER }
+                when (channel.sourceType) {
+                    "EXTERNAL" -> openExternalLink(channel.source)
+                    "SERIES" -> openSeries(channel)
+                    else -> {
+                        playerReturnScreenState.value = Screen.HOME
+                        playingState.value = channel
+                        screenState.value = Screen.PLAYER
+                    }
+                }
             },
             modifier = Modifier.fillMaxWidth().height(130.dp).focusable(),
         ) {
@@ -379,6 +405,7 @@ class MainActivity : ComponentActivity() {
                     when (channel.sourceType) {
                         "LOCAL" -> "Vídeo do aparelho"
                         "EXTERNAL" -> "Link externo · ${redactSource(channel.source)}"
+                        "SERIES" -> "Série · toque para ver os episódios"
                         else -> redactSource(channel.source)
                     },
                     maxLines = 1,
@@ -522,7 +549,7 @@ class MainActivity : ComponentActivity() {
         var selected by remember(preview) { mutableStateOf(preview.indices.toSet()) }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Importar playlist M3U", style = MaterialTheme.typography.headlineSmall)
-            Text("A lista e as credenciais ficam somente neste aparelho.")
+            Text("Aceita playlists M3U e acessos Xtream. Canais, filmes, séries e credenciais ficam somente neste aparelho.")
             OutlinedTextField(
                 url, { url = it }, label = { Text("URL da playlist") }, modifier = Modifier.fillMaxWidth(),
                 visualTransformation = if (!reveal && isSensitive(url)) PasswordVisualTransformation() else VisualTransformation.None,
@@ -541,7 +568,7 @@ class MainActivity : ComponentActivity() {
             Text("Importar M3U extrai os canais. Link externo apenas guarda o endereço e o abre no navegador.")
             if (loading) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text("Extraindo canais…")
+                Text("Buscando canais e vídeos…")
             }
             if (preview.isNotEmpty()) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -658,6 +685,45 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
+    private fun SeriesScreen(series: Channel) {
+        val episodes by seriesEpisodesState
+        val loading by seriesLoadingState
+        val error by seriesErrorState
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(series.name, style = MaterialTheme.typography.headlineSmall)
+            Text(series.category, color = MaterialTheme.colorScheme.secondary)
+            when {
+                loading -> {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text("Buscando temporadas e episódios…")
+                }
+                error != null -> {
+                    Text(error!!, color = MaterialTheme.colorScheme.error)
+                    Button(onClick = { openSeries(series) }) { Text("Tentar novamente") }
+                }
+                episodes.isEmpty() -> Text("Nenhum episódio foi encontrado para esta série.")
+                else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(episodes, key = { it.source }) { episode ->
+                        Card(
+                            onClick = {
+                                playerReturnScreenState.value = Screen.SERIES
+                                playingState.value = episode
+                                screenState.value = Screen.PLAYER
+                            },
+                            modifier = Modifier.fillMaxWidth().focusable(),
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(episode.name, fontWeight = FontWeight.Bold)
+                                Text(episode.category, color = MaterialTheme.colorScheme.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
     private fun PlayerScreen(channel: Channel, playable: List<Channel>) {
         val context = LocalContext.current
         val player = remember(channel.id, channel.source) {
@@ -680,8 +746,8 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { PlayerView(it).apply { this.player = player; useController = true } }, modifier = Modifier.fillMaxSize())
             Row(Modifier.align(Alignment.TopCenter).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { screenState.value = Screen.HOME }) { Text("Voltar") }
-                val index = playable.indexOfFirst { it.id == channel.id }
+                Button(onClick = { screenState.value = playerReturnScreenState.value }) { Text("Voltar") }
+                val index = playable.indexOfFirst { it.source == channel.source }
                 if (playable.size > 1 && index >= 0) {
                     OutlinedButton(onClick = { playingState.value = playable[(index - 1 + playable.size) % playable.size] }) { Text("Anterior") }
                     OutlinedButton(onClick = { playingState.value = playable[(index + 1) % playable.size] }) { Text("Próximo") }
@@ -776,22 +842,166 @@ class MainActivity : ComponentActivity() {
         playlistLoadingState.value = true
         playlistPreviewState.value = emptyList()
         executor.execute {
-            var connection: HttpURLConnection? = null
             try {
-                connection = URL(normalized).openConnection() as HttpURLConnection
-                connection.instanceFollowRedirects = true
-                connection.connectTimeout = 20_000; connection.readTimeout = 60_000
-                connection.setRequestProperty("User-Agent", "IPTV-Caseiro/1.0")
-                connection.setRequestProperty("Accept", "application/x-mpegURL, audio/x-mpegurl, text/plain, */*")
-                val code = connection.responseCode
-                if (code !in 200..299) throw IllegalStateException("O servidor respondeu com o código $code.")
-                val declared = connection.contentLengthLong
-                if (declared > M3uParser.MAX_BYTES) throw IllegalStateException("A playlist ultrapassa o limite de 50 MB.")
-                showPlaylistPreview(M3uParser.parse(connection.inputStream))
+                val access = parseXtreamAccess(normalized)
+                val channels = if (access != null) fetchXtreamCatalog(access) else {
+                    val bytes = fetchHttpBytes(normalized, "application/x-mpegURL, audio/x-mpegurl, text/plain, */*", M3uParser.MAX_BYTES)
+                    M3uParser.parse(ByteArrayInputStream(bytes))
+                }
+                showPlaylistPreview(channels)
             } catch (error: Exception) {
                 runOnUiThread { playlistLoadingState.value = false }
                 showNotice(error.message ?: "Falha ao importar a playlist.")
-            } finally { connection?.disconnect() }
+            }
+        }
+    }
+
+    private fun parseXtreamAccess(value: String): XtreamAccess? {
+        val uri = runCatching { URI(value) }.getOrNull() ?: return null
+        if (uri.scheme !in setOf("http", "https") || uri.rawAuthority.isNullOrBlank()) return null
+        val parameters = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
+            val pieces = part.split('=', limit = 2)
+            if (pieces.isEmpty()) null else URLDecoder.decode(pieces[0], StandardCharsets.UTF_8.name()) to URLDecoder.decode(pieces.getOrElse(1) { "" }, StandardCharsets.UTF_8.name())
+        }.toMap()
+        val username = parameters["username"].orEmpty()
+        val password = parameters["password"].orEmpty()
+        if (username.isBlank() || password.isBlank()) return null
+        val directory = uri.rawPath.orEmpty().substringBeforeLast('/', "")
+        return XtreamAccess("${uri.scheme}://${uri.rawAuthority}$directory", username, password)
+    }
+
+    private fun xtreamApiUrl(access: XtreamAccess, action: String, extraName: String? = null, extraValue: String? = null): String {
+        val encode = { text: String -> URLEncoder.encode(text, StandardCharsets.UTF_8.name()).replace("+", "%20") }
+        return buildString {
+            append(access.root).append("/player_api.php?username=").append(encode(access.username))
+            append("&password=").append(encode(access.password)).append("&action=").append(encode(action))
+            if (extraName != null && extraValue != null) append('&').append(encode(extraName)).append('=').append(encode(extraValue))
+        }
+    }
+
+    private fun xtreamStreamUrl(access: XtreamAccess, kind: String, id: String, extension: String): String {
+        val encode = { text: String -> URLEncoder.encode(text, StandardCharsets.UTF_8.name()).replace("+", "%20") }
+        val safeExtension = extension.filter { it.isLetterOrDigit() }.ifBlank { "ts" }
+        return "${access.root}/$kind/${encode(access.username)}/${encode(access.password)}/${encode(id)}.$safeExtension"
+    }
+
+    private fun fetchXtreamCatalog(access: XtreamAccess): List<Channel> {
+        fun categories(action: String): Map<String, String> {
+            val array = JSONArray(String(fetchHttpBytes(xtreamApiUrl(access, action), "application/json", 8 * 1024 * 1024), StandardCharsets.UTF_8))
+            return buildMap {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    put(item.optString("category_id"), item.optString("category_name").ifBlank { "Sem categoria" })
+                }
+            }
+        }
+        val result = ArrayList<Channel>()
+        val seen = HashSet<String>()
+        fun addItems(categoryAction: String, itemAction: String, sourceType: String) {
+            val categoryNames = categories(categoryAction)
+            val bytes = fetchHttpBytes(xtreamApiUrl(access, itemAction), "application/json", 64 * 1024 * 1024)
+            val array = JSONArray(String(bytes, StandardCharsets.UTF_8))
+            for (index in 0 until array.length()) {
+                if (result.size >= M3uParser.MAX_CHANNELS) throw IllegalStateException("O catálogo ultrapassa o limite de ${M3uParser.MAX_CHANNELS} itens.")
+                val item = array.optJSONObject(index) ?: continue
+                val idName = if (sourceType == "SERIES") "series_id" else "stream_id"
+                val id = item.optString(idName).takeUnless { it.isBlank() || it == "null" } ?: continue
+                val extension = item.optString("container_extension", "ts")
+                val source = when (sourceType) {
+                    "SERIES" -> xtreamApiUrl(access, "get_series_info", "series_id", id)
+                    "VOD" -> xtreamStreamUrl(access, "movie", id, extension)
+                    else -> xtreamStreamUrl(access, "live", id, extension)
+                }
+                if (!seen.add(source)) continue
+                result += Channel().apply {
+                    name = item.optString("name").ifBlank { item.optString("title") }.ifBlank { "Conteúdo sem nome" }
+                    description = item.optString("plot").take(500)
+                    category = categoryNames[item.optString("category_id")].orEmpty().ifBlank { "Sem categoria" }
+                    logoUrl = if (sourceType == "SERIES") item.optString("cover") else item.optString("stream_icon")
+                    this.sourceType = if (sourceType == "VOD") "STREAM" else sourceType
+                    this.source = source
+                    active = true
+                }
+            }
+        }
+        addItems("get_live_categories", "get_live_streams", "STREAM")
+        addItems("get_vod_categories", "get_vod_streams", "VOD")
+        addItems("get_series_categories", "get_series", "SERIES")
+        return result
+    }
+
+    private fun fetchHttpBytes(address: String, accept: String, maximum: Int): ByteArray {
+        var connection: HttpURLConnection? = null
+        try {
+            connection = URL(address).openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = true
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 60_000
+            connection.setRequestProperty("User-Agent", "IPTV-Caseiro/1.0")
+            connection.setRequestProperty("Accept", accept)
+            val code = connection.responseCode
+            if (code !in 200..299) throw IllegalStateException("O servidor respondeu com o código $code.")
+            if (connection.contentLengthLong > maximum) throw IllegalStateException("A resposta do servidor ultrapassa o limite permitido.")
+            val output = ByteArrayOutputStream()
+            connection.inputStream.use { input ->
+                val buffer = ByteArray(64 * 1024)
+                var total = 0
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    total += read
+                    if (total > maximum) throw IllegalStateException("A resposta do servidor ultrapassa o limite permitido.")
+                    output.write(buffer, 0, read)
+                }
+            }
+            return output.toByteArray()
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun openSeries(series: Channel) {
+        seriesState.value = series
+        seriesEpisodesState.value = emptyList()
+        seriesErrorState.value = null
+        seriesLoadingState.value = true
+        screenState.value = Screen.SERIES
+        executor.execute {
+            try {
+                val access = parseXtreamAccess(series.source) ?: throw IllegalStateException("Os dados de acesso desta série são inválidos.")
+                val root = JSONObject(String(fetchHttpBytes(series.source, "application/json", 32 * 1024 * 1024), StandardCharsets.UTF_8))
+                val episodesObject = root.optJSONObject("episodes") ?: throw IllegalStateException("O servidor não retornou os episódios desta série.")
+                val seasons = mutableListOf<String>()
+                val keys = episodesObject.keys()
+                while (keys.hasNext()) seasons += keys.next()
+                seasons.sortWith(compareBy({ it.toIntOrNull() ?: Int.MAX_VALUE }, { it }))
+                val episodes = ArrayList<Channel>()
+                for (season in seasons) {
+                    val array = episodesObject.optJSONArray(season) ?: continue
+                    for (index in 0 until array.length()) {
+                        if (episodes.size >= M3uParser.MAX_CHANNELS) throw IllegalStateException("A série possui episódios demais.")
+                        val item = array.optJSONObject(index) ?: continue
+                        val id = item.optString("id").takeUnless { it.isBlank() || it == "null" } ?: continue
+                        val extension = item.optString("container_extension", "mp4")
+                        episodes += Channel().apply {
+                            name = item.optString("title").ifBlank { "Episódio ${item.optString("episode_num", (index + 1).toString())}" }
+                            category = "Temporada $season"
+                            sourceType = "STREAM"
+                            source = xtreamStreamUrl(access, "series", id, extension)
+                            active = true
+                        }
+                    }
+                }
+                runOnUiThread {
+                    seriesEpisodesState.value = episodes
+                    seriesLoadingState.value = false
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    seriesLoadingState.value = false
+                    seriesErrorState.value = error.message ?: "Não foi possível carregar os episódios."
+                }
+            }
         }
     }
 
@@ -801,13 +1011,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun importChannels(channels: List<Channel>) {
-        val dao = AppDatabase.get(this).channelDao()
-        val added = dao.insertAll(channels).count { it != -1L }
-        val duplicates = channels.size - added
-        loadChannels {
-            playlistPreviewState.value = emptyList()
-            showNotice("Importação concluída: $added adicionados e $duplicates repetidos ignorados.")
-            screenState.value = Screen.MANAGE
+        playlistLoadingState.value = true
+        executor.execute {
+            val dao = AppDatabase.get(this).channelDao()
+            var added = 0
+            channels.chunked(1_000).forEach { batch -> added += dao.insertAll(batch).count { it != -1L } }
+            val duplicates = channels.size - added
+            loadChannels {
+                playlistLoadingState.value = false
+                playlistPreviewState.value = emptyList()
+                showNotice("Importação concluída: $added adicionados e $duplicates repetidos ignorados.")
+                screenState.value = Screen.MANAGE
+            }
         }
     }
 
@@ -1075,22 +1290,35 @@ class MainActivity : ComponentActivity() {
 }
 
 internal fun isSensitive(value: String): Boolean {
-    val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return false
+    val uri = runCatching { URI(value) }.getOrNull() ?: return false
     if (uri.isOpaque) return false
     val privateNames = setOf("token", "key", "password", "pass", "username", "user", "auth")
     val hasPrivateQuery = uri.rawQuery.orEmpty().split('&').any { parameter ->
         parameter.substringBefore('=').lowercase() in privateNames
     }
-    return !uri.rawUserInfo.isNullOrBlank() || hasPrivateQuery
+    return !uri.rawUserInfo.isNullOrBlank() || hasPrivateQuery || hasXtreamPathCredentials(uri)
 }
 
 internal fun redactSource(value: String): String {
     if (value.startsWith("content://")) return "Arquivo local protegido"
-    val uri = runCatching { java.net.URI(value) }.getOrNull() ?: return "Origem protegida"
+    val uri = runCatching { URI(value) }.getOrNull() ?: return "Origem protegida"
     if (uri.isOpaque) return value
     if (!isSensitive(value)) return value
     val port = if (uri.port > 0) ":${uri.port}" else ""
+    if (hasXtreamPathCredentials(uri)) {
+        val segments = uri.rawPath.orEmpty().split('/').filter { it.isNotBlank() }
+        val typeIndex = segments.indexOfFirst { it.lowercase() in setOf("live", "movie", "series") }
+        val prefix = segments.take(typeIndex + 1).joinToString("/")
+        val item = segments.lastOrNull().orEmpty()
+        return "${uri.scheme ?: "https"}://${uri.host ?: "origem"}$port/$prefix/•••/•••/$item"
+    }
     return "${uri.scheme ?: "https"}://${uri.host ?: "origem"}$port${uri.rawPath ?: ""}?…"
+}
+
+private fun hasXtreamPathCredentials(uri: URI): Boolean {
+    val segments = uri.rawPath.orEmpty().split('/').filter { it.isNotBlank() }
+    val typeIndex = segments.indexOfFirst { it.lowercase() in setOf("live", "movie", "series") }
+    return typeIndex >= 0 && segments.size >= typeIndex + 4
 }
 
 @Composable
