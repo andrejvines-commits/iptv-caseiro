@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -36,7 +37,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -105,7 +105,7 @@ private const val APK_NAME = "iptv-caseiro.apk"
 private const val PREFS = "iptv_caseiro"
 private const val UPDATE_CHECKED_AT = "update_checked_at"
 private const val BUNDLED_CATALOG_ASSET = "bundled-catalog.iptvbak"
-private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_1"
+private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_2"
 private const val DAY_MS = 24L * 60L * 60L * 1000L
 
 private enum class Screen { HOME, MANAGE, EDIT, IMPORT, BACKUP, PLAYER }
@@ -302,25 +302,47 @@ class MainActivity : ComponentActivity() {
         }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(query, { query = it }, label = { Text("Pesquisar canais") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            FilterChip(selected = favoritesOnly, onClick = { favoritesOnly = !favoritesOnly }, label = { Text("★ Favoritos") })
-            Text("Pastas", fontWeight = FontWeight.Bold)
-            LazyRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(categories, key = { it }) { folder ->
-                    val count = if (folder == "Todos") channels.count { it.active } else channels.count { it.active && it.category == folder }
-                    FilterChip(
-                        selected = category == folder,
-                        onClick = { category = folder },
-                        label = { Text(if (folder == "Todos") "Todos ($count)" else "📁 $folder ($count)") },
-                    )
-                }
-            }
-            if (filtered.isEmpty()) {
-                EmptyCatalog(onManage = { screenState.value = Screen.MANAGE })
-            } else {
-                BoxWithConstraints(Modifier.fillMaxSize()) {
-                    val minimum = if (maxWidth >= 900.dp) 240.dp else 160.dp
-                    LazyVerticalGrid(columns = GridCells.Adaptive(minimum), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(filtered, key = { it.id }) { channel -> ChannelCard(channel) }
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val availableWidth = maxWidth
+                val sidebarWidth = if (availableWidth >= 600.dp) 190.dp else 128.dp
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(
+                        Modifier.width(sidebarWidth).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Pastas", fontWeight = FontWeight.Bold)
+                        FilterChip(
+                            selected = favoritesOnly,
+                            onClick = { favoritesOnly = !favoritesOnly },
+                            label = { Text("★ Favoritos") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(categories, key = { it }) { folder ->
+                                val count = if (folder == "Todos") channels.count { it.active } else channels.count { it.active && it.category == folder }
+                                FilterChip(
+                                    selected = category == folder,
+                                    onClick = { category = folder },
+                                    label = { Text(if (folder == "Todos") "Todos ($count)" else "📁 $folder ($count)", maxLines = 2) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                    if (filtered.isEmpty()) {
+                        Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                            Text(if (channels.none { it.active }) "Seu catálogo está vazio" else "Nenhum canal encontrado nesta pasta.")
+                        }
+                    } else {
+                        val minimum = if (availableWidth >= 900.dp) 240.dp else 160.dp
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minimum),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            items(filtered, key = { it.id }) { channel -> ChannelCard(channel) }
+                        }
                     }
                 }
             }
