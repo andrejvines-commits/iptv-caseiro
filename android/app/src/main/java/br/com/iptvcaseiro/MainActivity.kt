@@ -63,7 +63,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -116,6 +118,7 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlinx.coroutines.delay
 
 private const val APK_NAME = "iptv-caseiro.apk"
 private const val PREFS = "iptv_caseiro"
@@ -773,6 +776,9 @@ class MainActivity : ComponentActivity() {
         var playbackError by remember(channel.id, channel.source) { mutableStateOf<String?>(null) }
         var buffering by remember(channel.id, channel.source) { mutableStateOf(true) }
         var controlsVisible by remember(channel.id, channel.source) { mutableStateOf(true) }
+        var controlsReset by remember(channel.id, channel.source) { mutableIntStateOf(0) }
+        var playerView by remember(channel.id, channel.source) { mutableStateOf<PlayerView?>(null) }
+        var automaticRetries by remember(channel.id, channel.source) { mutableIntStateOf(0) }
         var epgSchedule by remember(channel.id, channel.source) { mutableStateOf<EpgSchedule?>(null) }
         var epgLoading by remember(channel.id, channel.source) { mutableStateOf(false) }
         val supportsEpg = remember(channel.source) { parseXtreamLiveAccess(channel.source) != null }
@@ -798,12 +804,29 @@ class MainActivity : ComponentActivity() {
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         buffering = playbackState == Player.STATE_BUFFERING
-                        if (playbackState == Player.STATE_READY) playbackError = null
+                        if (playbackState == Player.STATE_READY) {
+                            playbackError = null
+                            automaticRetries = 0
+                        }
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
-                        buffering = false
-                        playbackError = playbackErrorMessage(error)
+                        val failedPlayer = this@apply
+                        val responseCode = httpResponseCode(error)
+                        if (responseCode in setOf(404, 429, 502, 503, 504, 522) && automaticRetries < 2) {
+                            automaticRetries += 1
+                            playbackError = null
+                            buffering = true
+                            window.decorView.postDelayed({
+                                if (activePlayer === failedPlayer) {
+                                    failedPlayer.prepare()
+                                    failedPlayer.play()
+                                }
+                            }, automaticRetries * 1_500L)
+                        } else {
+                            buffering = false
+                            playbackError = playbackErrorMessage(error)
+                        }
                     }
                 })
                 setMediaItem(MediaItem.fromUri(channel.source))
@@ -839,16 +862,23 @@ class MainActivity : ComponentActivity() {
             }
             onDispose { cancelled.set(true) }
         }
+        LaunchedEffect(channel.id, channel.source, controlsReset) {
+            delay(3_000)
+            controlsVisible = false
+            playerView?.hideController()
+        }
         Box(Modifier.fillMaxSize()) {
             AndroidView(
                 factory = {
                     PlayerView(it).apply {
+                        playerView = this
                         this.player = player
                         useController = true
                         controllerShowTimeoutMs = 3_000
                         setControllerVisibilityListener(
                             PlayerView.ControllerVisibilityListener { visibility ->
                                 controlsVisible = visibility == View.VISIBLE
+                                if (controlsVisible) controlsReset += 1
                             },
                         )
                         setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
@@ -962,11 +992,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun playbackErrorMessage(error: PlaybackException): String {
-        val httpError = generateSequence<Throwable>(error) { it.cause }
-            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
-            .firstOrNull()
+        val responseCode = httpResponseCode(error)
         return when {
-            httpError != null -> "O servidor do canal respondeu com o código ${httpError.responseCode}. Tente novamente ou escolha outro canal."
+            responseCode == 404 -> "Este canal está fora do ar ou o endereço dele expirou. O aplicativo tentou novamente duas vezes. Escolha outro canal ou atualize a lista."
+            responseCode != null -> "O servidor do canal respondeu com o código $responseCode. Tente novamente ou escolha outro canal."
             error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
                 error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
                 "Não foi possível conectar ao servidor do canal. Verifique a internet e tente novamente."
@@ -976,6 +1005,12 @@ class MainActivity : ComponentActivity() {
             else -> "O servidor não entregou um vídeo compatível. Tente novamente ou escolha outro canal."
         }
     }
+
+    private fun httpResponseCode(error: PlaybackException): Int? =
+        generateSequence<Throwable>(error) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+            ?.responseCode
 
     @Composable
     private fun UpdateDialog(state: UpdateState) {
