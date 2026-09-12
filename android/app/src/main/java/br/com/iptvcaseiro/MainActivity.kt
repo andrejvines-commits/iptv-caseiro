@@ -123,6 +123,7 @@ import kotlinx.coroutines.delay
 private const val APK_NAME = "iptv-caseiro.apk"
 private const val PREFS = "iptv_caseiro"
 private const val UPDATE_CHECKED_AT = "update_checked_at"
+private const val LAST_VIEWED_CATEGORY = "last_viewed_category"
 private const val BUNDLED_CATALOG_ASSET = "bundled-catalog.iptvbak"
 private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_2"
 private const val DAY_MS = 24L * 60L * 60L * 1000L
@@ -327,14 +328,21 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun HomeScreen(channels: List<Channel>) {
+        val context = LocalContext.current
+        val preferences = remember(context) { context.getSharedPreferences(PREFS, MODE_PRIVATE) }
         var query by rememberSaveable { mutableStateOf("") }
         var favoritesOnly by rememberSaveable { mutableStateOf(false) }
         var category by rememberSaveable { mutableStateOf("Todos") }
+        var lastViewedCategory by rememberSaveable {
+            mutableStateOf(preferences.getString(LAST_VIEWED_CATEGORY, "").orEmpty())
+        }
         var folderToDelete by remember { mutableStateOf<String?>(null) }
         val activeChannels = remember(channels) { channels.filter { it.active } }
         val categoryCounts = remember(activeChannels) { activeChannels.groupingBy { it.category }.eachCount() }
-        val categories = remember(categoryCounts) {
-            listOf("Todos") + categoryCounts.keys.filterNot { it.equals("Todos", true) }.sorted()
+        val categories = remember(categoryCounts, lastViewedCategory) {
+            val folders = categoryCounts.keys.filterNot { it.equals("Todos", true) }
+            val recent = folders.firstOrNull { it.equals(lastViewedCategory, ignoreCase = true) }
+            listOf("Todos") + listOfNotNull(recent) + folders.filterNot { it == recent }.sorted()
         }
         val filtered = activeChannels.filter {
             (!favoritesOnly || it.favorite) &&
@@ -363,7 +371,13 @@ class MainActivity : ComponentActivity() {
                                 val count = if (folder == "Todos") activeChannels.size else categoryCounts[folder] ?: 0
                                 FilterChip(
                                     selected = category == folder,
-                                    onClick = { category = folder },
+                                    onClick = {
+                                        category = folder
+                                        if (folder != "Todos") {
+                                            lastViewedCategory = folder
+                                            preferences.edit().putString(LAST_VIEWED_CATEGORY, folder).apply()
+                                        }
+                                    },
                                     label = { Text(if (folder == "Todos") "Todos ($count)" else "📁 $folder ($count)", maxLines = 2) },
                                     modifier = Modifier.fillMaxWidth(),
                                 )
@@ -407,6 +421,10 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick = {
                         folderToDelete = null
                         category = "Todos"
+                        if (folder.equals(lastViewedCategory, ignoreCase = true)) {
+                            lastViewedCategory = ""
+                            preferences.edit().remove(LAST_VIEWED_CATEGORY).apply()
+                        }
                         deleteChannels(ids)
                     }) { Text("Excluir") }
                 },
