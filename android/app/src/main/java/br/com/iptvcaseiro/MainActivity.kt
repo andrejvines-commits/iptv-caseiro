@@ -110,6 +110,10 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -123,6 +127,12 @@ private const val DAY_MS = 24L * 60L * 60L * 1000L
 private enum class Screen { HOME, MANAGE, EDIT, IMPORT, BACKUP, SERIES, PLAYER }
 
 private data class XtreamAccess(val root: String, val username: String, val password: String)
+
+private data class XtreamLiveAccess(val access: XtreamAccess, val streamId: String)
+
+private data class EpgProgram(val title: String, val start: Long, val end: Long)
+
+private data class EpgSchedule(val current: EpgProgram?, val next: EpgProgram?)
 
 private sealed interface UpdateState {
     data object Hidden : UpdateState
@@ -763,6 +773,9 @@ class MainActivity : ComponentActivity() {
         var playbackError by remember(channel.id, channel.source) { mutableStateOf<String?>(null) }
         var buffering by remember(channel.id, channel.source) { mutableStateOf(true) }
         var controlsVisible by remember(channel.id, channel.source) { mutableStateOf(true) }
+        var epgSchedule by remember(channel.id, channel.source) { mutableStateOf<EpgSchedule?>(null) }
+        var epgLoading by remember(channel.id, channel.source) { mutableStateOf(false) }
+        val supportsEpg = remember(channel.source) { parseXtreamLiveAccess(channel.source) != null }
         val channelIndex = playable.indexOfFirst { it.source == channel.source }
         fun changeChannel(offset: Int) {
             if (playable.size > 1 && channelIndex >= 0) {
@@ -807,6 +820,24 @@ class MainActivity : ComponentActivity() {
                 player.release()
                 WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
             }
+        }
+        DisposableEffect(channel.id, channel.source) {
+            val cancelled = AtomicBoolean(false)
+            if (supportsEpg) {
+                epgLoading = true
+                executor.execute {
+                    val schedule = runCatching { fetchEpgSchedule(channel.source) }.getOrNull()
+                    if (!cancelled.get()) {
+                        runOnUiThread {
+                            if (!cancelled.get()) {
+                                epgSchedule = schedule
+                                epgLoading = false
+                            }
+                        }
+                    }
+                }
+            }
+            onDispose { cancelled.set(true) }
         }
         Box(Modifier.fillMaxSize()) {
             AndroidView(
@@ -861,8 +892,73 @@ class MainActivity : ComponentActivity() {
                         OutlinedButton(onClick = { changeChannel(1) }) { Text("Canal ↓") }
                     }
                 }
+                if (supportsEpg) {
+                    Card(Modifier.align(Alignment.BottomStart).padding(start = 12.dp, bottom = 76.dp, end = 110.dp)) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            when {
+                                epgLoading -> Text("Buscando programação…")
+                                epgSchedule?.current == null && epgSchedule?.next == null -> Text("Programação não disponível")
+                                else -> {
+                                    epgSchedule?.current?.let { program ->
+                                        Text("Agora · ${formatEpgPeriod(program)}", color = MaterialTheme.colorScheme.secondary)
+                                        Text(program.title, fontWeight = FontWeight.Bold, maxLines = 1)
+                                    }
+                                    epgSchedule?.next?.let { program ->
+                                        Text("A seguir · ${formatEpgPeriod(program)}", color = MaterialTheme.colorScheme.secondary)
+                                        Text(program.title, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+
+    private fun parseXtreamLiveAccess(value: String): XtreamLiveAccess? {
+        val uri = runCatching { URI(value) }.getOrNull() ?: return null
+        if (uri.scheme !in setOf("http", "https") || uri.rawAuthority.isNullOrBlank()) return null
+        val rawSegments = uri.rawPath.orEmpty().split('/').filter { it.isNotBlank() }
+        val liveIndex = rawSegments.indexOfLast { it.equals("live", ignoreCase = true) }
+        if (liveIndex < 0 || rawSegments.size < liveIndex + 4) return null
+        val decode = { text: String -> URLDecoder.decode(text, StandardCharsets.UTF_8.name()) }
+        val username = decode(rawSegments[liveIndex + 1])
+        val password = decode(rawSegments[liveIndex + 2])
+        val streamId = decode(rawSegments[liveIndex + 3]).substringBeforeLast('.')
+        if (username.isBlank() || password.isBlank() || streamId.isBlank()) return null
+        val prefix = rawSegments.take(liveIndex).joinToString("/")
+        val root = "${uri.scheme}://${uri.rawAuthority}" + if (prefix.isBlank()) "" else "/$prefix"
+        return XtreamLiveAccess(XtreamAccess(root, username, password), streamId)
+    }
+
+    private fun fetchEpgSchedule(source: String): EpgSchedule? {
+        val live = parseXtreamLiveAccess(source) ?: return null
+        val address = xtreamApiUrl(live.access, "get_short_epg", "stream_id", live.streamId) + "&limit=6"
+        val response = JSONObject(String(fetchHttpBytes(address, "application/json", 2 * 1024 * 1024), StandardCharsets.UTF_8))
+        val listings = response.optJSONArray("epg_listings") ?: return EpgSchedule(null, null)
+        val programs = buildList {
+            for (index in 0 until listings.length()) {
+                val item = listings.optJSONObject(index) ?: continue
+                val start = item.optLong("start_timestamp")
+                val end = item.optLong("stop_timestamp")
+                if (start <= 0L || end <= start) continue
+                val encodedTitle = item.optString("title")
+                val title = runCatching {
+                    String(android.util.Base64.decode(encodedTitle, android.util.Base64.DEFAULT), StandardCharsets.UTF_8)
+                }.getOrDefault(encodedTitle).trim().ifBlank { "Programa sem título" }
+                add(EpgProgram(title, start, end))
+            }
+        }.sortedBy { it.start }
+        val now = System.currentTimeMillis() / 1000L
+        val current = programs.lastOrNull { it.start <= now && now < it.end }
+        val next = programs.firstOrNull { it.start >= (current?.end ?: now) }
+        return EpgSchedule(current, next)
+    }
+
+    private fun formatEpgPeriod(program: EpgProgram): String {
+        val formatter = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+        return "${formatter.format(Instant.ofEpochSecond(program.start))}–${formatter.format(Instant.ofEpochSecond(program.end))}"
     }
 
     private fun playbackErrorMessage(error: PlaybackException): String {
