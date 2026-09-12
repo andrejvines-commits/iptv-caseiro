@@ -52,6 +52,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -81,8 +82,14 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import br.com.iptvcaseiro.data.AppDatabase
 import br.com.iptvcaseiro.data.Channel
@@ -723,11 +730,36 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @androidx.annotation.OptIn(UnstableApi::class)
     @Composable
     private fun PlayerScreen(channel: Channel, playable: List<Channel>) {
         val context = LocalContext.current
+        var playbackError by remember(channel.id, channel.source) { mutableStateOf<String?>(null) }
+        var buffering by remember(channel.id, channel.source) { mutableStateOf(true) }
         val player = remember(channel.id, channel.source) {
-            ExoPlayer.Builder(context).build().apply {
+            val httpDataSource = DefaultHttpDataSource.Factory()
+                .setUserAgent("IPTV-Caseiro/${BuildConfig.VERSION_NAME}")
+                // Muitos painéis Xtream entregam a API em HTTPS, mas redirecionam
+                // o vídeo para um CDN HTTP. O Media3 bloqueia essa troca por padrão.
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(20_000)
+                .setReadTimeoutMs(60_000)
+            val mediaSourceFactory = DefaultMediaSourceFactory(context)
+                .setDataSourceFactory(DefaultDataSource.Factory(context, httpDataSource))
+            ExoPlayer.Builder(context)
+                .setMediaSourceFactory(mediaSourceFactory)
+                .build().apply {
+                addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        buffering = playbackState == Player.STATE_BUFFERING
+                        if (playbackState == Player.STATE_READY) playbackError = null
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        buffering = false
+                        playbackError = playbackErrorMessage(error)
+                    }
+                })
                 setMediaItem(MediaItem.fromUri(channel.source))
                 prepare()
                 playWhenReady = true
@@ -744,7 +776,37 @@ class MainActivity : ComponentActivity() {
             }
         }
         Box(Modifier.fillMaxSize()) {
-            AndroidView(factory = { PlayerView(it).apply { this.player = player; useController = true } }, modifier = Modifier.fillMaxSize())
+            AndroidView(
+                factory = {
+                    PlayerView(it).apply {
+                        this.player = player
+                        useController = true
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (buffering && playbackError == null) {
+                CircularProgressIndicator(Modifier.align(Alignment.Center))
+            }
+            playbackError?.let { message ->
+                Card(Modifier.align(Alignment.Center).padding(24.dp)) {
+                    Column(
+                        Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text("Não foi possível reproduzir", style = MaterialTheme.typography.titleLarge)
+                        Text(message)
+                        Button(onClick = {
+                            playbackError = null
+                            buffering = true
+                            player.prepare()
+                            player.play()
+                        }) { Text("Tentar novamente") }
+                    }
+                }
+            }
             Row(Modifier.align(Alignment.TopCenter).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { screenState.value = playerReturnScreenState.value }) { Text("Voltar") }
                 val index = playable.indexOfFirst { it.source == channel.source }
@@ -753,6 +815,22 @@ class MainActivity : ComponentActivity() {
                     OutlinedButton(onClick = { playingState.value = playable[(index + 1) % playable.size] }) { Text("Próximo") }
                 }
             }
+        }
+    }
+
+    private fun playbackErrorMessage(error: PlaybackException): String {
+        val httpError = generateSequence<Throwable>(error) { it.cause }
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+        return when {
+            httpError != null -> "O servidor do canal respondeu com o código ${httpError.responseCode}. Tente novamente ou escolha outro canal."
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                "Não foi possível conectar ao servidor do canal. Verifique a internet e tente novamente."
+            error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED ||
+                error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ->
+                "Este aparelho não oferece suporte ao formato deste vídeo."
+            else -> "O servidor não entregou um vídeo compatível. Tente novamente ou escolha outro canal."
         }
     }
 
