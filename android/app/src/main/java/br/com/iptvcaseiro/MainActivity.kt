@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.view.View
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -316,6 +317,7 @@ class MainActivity : ComponentActivity() {
         var query by rememberSaveable { mutableStateOf("") }
         var favoritesOnly by rememberSaveable { mutableStateOf(false) }
         var category by rememberSaveable { mutableStateOf("Todos") }
+        var folderToDelete by remember { mutableStateOf<String?>(null) }
         val activeChannels = remember(channels) { channels.filter { it.active } }
         val categoryCounts = remember(activeChannels) { activeChannels.groupingBy { it.category }.eachCount() }
         val categories = remember(categoryCounts) {
@@ -354,6 +356,12 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
+                        if (category != "Todos") {
+                            OutlinedButton(
+                                onClick = { folderToDelete = category },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Excluir pasta") }
+                        }
                     }
                     if (filtered.isEmpty()) {
                         Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
@@ -372,6 +380,24 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+        folderToDelete?.let { folder ->
+            val ids = channels.filter { it.category == folder }.map { it.id }.toSet()
+            AlertDialog(
+                onDismissRequest = { folderToDelete = null },
+                title = { Text("Excluir pasta") },
+                text = { Text("Excluir a pasta “$folder” e seus ${ids.size} itens? Esta ação não pode ser desfeita.") },
+                dismissButton = {
+                    TextButton(onClick = { folderToDelete = null }) { Text("Cancelar") }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        folderToDelete = null
+                        category = "Todos"
+                        deleteChannels(ids)
+                    }) { Text("Excluir") }
+                },
+            )
         }
     }
 
@@ -736,6 +762,13 @@ class MainActivity : ComponentActivity() {
         val context = LocalContext.current
         var playbackError by remember(channel.id, channel.source) { mutableStateOf<String?>(null) }
         var buffering by remember(channel.id, channel.source) { mutableStateOf(true) }
+        var controlsVisible by remember(channel.id, channel.source) { mutableStateOf(true) }
+        val channelIndex = playable.indexOfFirst { it.source == channel.source }
+        fun changeChannel(offset: Int) {
+            if (playable.size > 1 && channelIndex >= 0) {
+                playingState.value = playable[(channelIndex + offset + playable.size) % playable.size]
+            }
+        }
         val player = remember(channel.id, channel.source) {
             val httpDataSource = DefaultHttpDataSource.Factory()
                 .setUserAgent("IPTV-Caseiro/${BuildConfig.VERSION_NAME}")
@@ -781,6 +814,12 @@ class MainActivity : ComponentActivity() {
                     PlayerView(it).apply {
                         this.player = player
                         useController = true
+                        controllerShowTimeoutMs = 3_000
+                        setControllerVisibilityListener(
+                            PlayerView.ControllerVisibilityListener { visibility ->
+                                controlsVisible = visibility == View.VISIBLE
+                            },
+                        )
                         setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                     }
                 },
@@ -807,12 +846,20 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-            Row(Modifier.align(Alignment.TopCenter).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { screenState.value = playerReturnScreenState.value }) { Text("Voltar") }
-                val index = playable.indexOfFirst { it.source == channel.source }
-                if (playable.size > 1 && index >= 0) {
-                    OutlinedButton(onClick = { playingState.value = playable[(index - 1 + playable.size) % playable.size] }) { Text("Anterior") }
-                    OutlinedButton(onClick = { playingState.value = playable[(index + 1) % playable.size] }) { Text("Próximo") }
+            if (controlsVisible) {
+                Button(
+                    onClick = { screenState.value = playerReturnScreenState.value },
+                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
+                ) { Text("Voltar") }
+                if (playable.size > 1 && channelIndex >= 0) {
+                    Column(
+                        Modifier.align(Alignment.CenterEnd).padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(onClick = { changeChannel(-1) }) { Text("Canal ↑") }
+                        OutlinedButton(onClick = { changeChannel(1) }) { Text("Canal ↓") }
+                    }
                 }
             }
         }
