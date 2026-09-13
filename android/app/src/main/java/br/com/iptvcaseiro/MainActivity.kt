@@ -152,8 +152,16 @@ private sealed interface PasswordAction {
     data class Restore(val uri: Uri) : PasswordAction
 }
 
+private sealed interface RecordingState {
+    data object Idle : RecordingState
+    data class Choosing(val source: String, val name: String) : RecordingState
+    data class Recording(val source: String, val name: String) : RecordingState
+    data class Stopping(val source: String, val name: String) : RecordingState
+}
+
 class MainActivity : ComponentActivity() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val recordingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val channelsState = mutableStateOf<List<Channel>>(emptyList())
     private val screenState = mutableStateOf(Screen.HOME)
     private val editingState = mutableStateOf<Channel?>(null)
@@ -171,18 +179,24 @@ class MainActivity : ComponentActivity() {
     private val seriesLoadingState = mutableStateOf(false)
     private val seriesErrorState = mutableStateOf<String?>(null)
     private val playerReturnScreenState = mutableStateOf(Screen.HOME)
+    private val recordingState = mutableStateOf<RecordingState>(RecordingState.Idle)
     private var checkingUpdates = false
     private var activePlayer: ExoPlayer? = null
     private var pendingApk: File? = null
     private var downloadId = -1L
     private var waitingInstallPermission = false
     private var exportPassword: CharArray? = null
+    private var pendingRecordingChannel: Channel? = null
+    private var resumeAfterRecordingPicker = false
+    private var recordingCancellation: AtomicBoolean? = null
+    @Volatile private var recordingConnection: HttpURLConnection? = null
 
     private lateinit var localVideoPicker: ActivityResultLauncher<Array<String>>
     private lateinit var playlistPicker: ActivityResultLauncher<Array<String>>
     private lateinit var pcDatabasePicker: ActivityResultLauncher<Array<String>>
     private lateinit var backupCreator: ActivityResultLauncher<String>
     private lateinit var backupPicker: ActivityResultLauncher<Array<String>>
+    private lateinit var recordingCreator: ActivityResultLauncher<String>
 
     private val downloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -256,6 +270,14 @@ class MainActivity : ComponentActivity() {
         }
         backupPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) passwordActionState.value = PasswordAction.Restore(uri)
+        }
+        recordingCreator = registerForActivityResult(ActivityResultContracts.CreateDocument("video/*")) { uri ->
+            val channel = pendingRecordingChannel
+            pendingRecordingChannel = null
+            if (uri != null && channel != null) startRecording(channel, uri)
+            else recordingState.value = RecordingState.Idle
+            if (resumeAfterRecordingPicker && screenState.value == Screen.PLAYER) activePlayer?.play()
+            resumeAfterRecordingPicker = false
         }
     }
 
@@ -797,8 +819,14 @@ class MainActivity : ComponentActivity() {
         var controlsReset by remember(channel.id, channel.source) { mutableIntStateOf(0) }
         var playerView by remember(channel.id, channel.source) { mutableStateOf<PlayerView?>(null) }
         var automaticRetries by remember(channel.id, channel.source) { mutableIntStateOf(0) }
+        var isPlaying by remember(channel.id, channel.source) { mutableStateOf(false) }
         var epgSchedule by remember(channel.id, channel.source) { mutableStateOf<EpgSchedule?>(null) }
         var epgLoading by remember(channel.id, channel.source) { mutableStateOf(false) }
+        val recording = recordingState.value
+        val recordingThisChannel = recording.let {
+            it is RecordingState.Recording && it.source == channel.source ||
+                it is RecordingState.Stopping && it.source == channel.source
+        }
         val supportsEpg = remember(channel.source) { parseXtreamLiveAccess(channel.source) != null }
         val channelIndex = playable.indexOfFirst { it.source == channel.source }
         fun changeChannel(offset: Int) {
@@ -826,6 +854,10 @@ class MainActivity : ComponentActivity() {
                             playbackError = null
                             automaticRetries = 0
                         }
+                    }
+
+                    override fun onIsPlayingChanged(playing: Boolean) {
+                        isPlaying = playing
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
@@ -858,6 +890,10 @@ class MainActivity : ComponentActivity() {
             WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.systemBars())
             onDispose {
                 if (activePlayer === player) activePlayer = null
+                val currentRecording = recordingState.value
+                if ((currentRecording is RecordingState.Recording && currentRecording.source == channel.source) ||
+                    (currentRecording is RecordingState.Stopping && currentRecording.source == channel.source)
+                ) stopRecording()
                 player.release()
                 WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
             }
@@ -930,6 +966,31 @@ class MainActivity : ComponentActivity() {
                     onClick = { screenState.value = playerReturnScreenState.value },
                     modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
                 ) { Text("Voltar") }
+                Row(
+                    Modifier.align(Alignment.TopCenter).padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(onClick = {
+                        controlsReset += 1
+                        if (player.isPlaying) player.pause() else player.play()
+                    }) { Text(if (isPlaying) "Pausar" else "Continuar") }
+                    Button(
+                        enabled = recording is RecordingState.Idle || recordingThisChannel,
+                        onClick = {
+                            controlsReset += 1
+                            if (recordingThisChannel) stopRecording() else requestRecording(channel)
+                        },
+                    ) {
+                        Text(
+                            when (recording) {
+                                is RecordingState.Choosing -> "Escolhendo…"
+                                is RecordingState.Recording -> if (recordingThisChannel) "Parar gravação" else "Gravando…"
+                                is RecordingState.Stopping -> "Salvando…"
+                                RecordingState.Idle -> "Gravar"
+                            },
+                        )
+                    }
+                }
                 if (playable.size > 1 && channelIndex >= 0) {
                     Column(
                         Modifier.align(Alignment.CenterEnd).padding(12.dp),
@@ -960,6 +1021,14 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
+            if (recordingThisChannel && !controlsVisible) {
+                Text(
+                    "● REC",
+                    color = Color.Red,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                )
             }
         }
     }
@@ -1029,6 +1098,116 @@ class MainActivity : ComponentActivity() {
             .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
             .firstOrNull()
             ?.responseCode
+
+    private fun requestRecording(channel: Channel) {
+        val uri = runCatching { URI(channel.source) }.getOrNull()
+        if (uri?.scheme !in setOf("http", "https")) {
+            showNotice("A gravação está disponível para canais HTTP ou HTTPS.")
+            return
+        }
+        if (uri?.path.orEmpty().lowercase().endsWith(".m3u8")) {
+            showNotice("Este canal usa uma playlist HLS. A gravação direta ainda não está disponível para esse formato.")
+            return
+        }
+        val extension = uri?.path.orEmpty().substringAfterLast('.', "ts").lowercase()
+            .takeIf { it in setOf("ts", "mp4", "mkv", "webm") } ?: "ts"
+        val safeName = channel.name.replace(Regex("[^\\p{L}\\p{N}._-]+"), "-").trim('-').take(48)
+            .ifBlank { "canal" }
+        val timestamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+            .withZone(ZoneId.systemDefault()).format(Instant.now())
+        pendingRecordingChannel = copyChannel(channel)
+        resumeAfterRecordingPicker = activePlayer?.isPlaying == true
+        recordingState.value = RecordingState.Choosing(channel.source, channel.name)
+        recordingCreator.launch("$safeName-$timestamp.$extension")
+    }
+
+    private fun startRecording(channel: Channel, destination: Uri) {
+        val cancellation = AtomicBoolean(false)
+        recordingCancellation = cancellation
+        recordingState.value = RecordingState.Recording(channel.source, channel.name)
+        recordingExecutor.execute {
+            var written = 0L
+            var failure: String? = null
+            var connection: HttpURLConnection? = null
+            try {
+                val openedConnection = openRecordingConnection(channel.source)
+                connection = openedConnection
+                recordingConnection = openedConnection
+                contentResolver.openOutputStream(destination, "w").use { output ->
+                    requireNotNull(output) { "O Android não permitiu criar o arquivo." }
+                    openedConnection.inputStream.use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (!cancellation.get()) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                            written += count
+                        }
+                        output.flush()
+                    }
+                }
+                if (written == 0L && !cancellation.get()) failure = "O servidor não enviou dados para gravar."
+            } catch (error: Exception) {
+                if (!cancellation.get()) failure = error.message ?: "Não foi possível gravar este canal."
+            } finally {
+                connection?.disconnect()
+                if (written == 0L) runCatching { contentResolver.delete(destination, null, null) }
+                runOnUiThread {
+                    if (recordingCancellation === cancellation) {
+                        recordingCancellation = null
+                        recordingConnection = null
+                        recordingState.value = RecordingState.Idle
+                        showNotice(
+                            when {
+                                written > 0L -> "Gravação encerrada e salva no aparelho."
+                                failure != null -> failure
+                                else -> "A gravação foi cancelada."
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun openRecordingConnection(address: String): HttpURLConnection {
+        var current = URL(address)
+        repeat(6) {
+            val connection = current.openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = false
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 60_000
+            connection.setRequestProperty("User-Agent", "IPTV-Caseiro/${BuildConfig.VERSION_NAME}")
+            connection.setRequestProperty("Accept", "video/*, application/octet-stream, */*")
+            val code = connection.responseCode
+            if (code in 300..399) {
+                val location = connection.getHeaderField("Location")
+                connection.disconnect()
+                if (location.isNullOrBlank()) throw IllegalStateException("O servidor redirecionou sem informar o destino.")
+                current = URL(current, location)
+            } else {
+                if (code !in 200..299) {
+                    connection.disconnect()
+                    throw IllegalStateException("O servidor respondeu com o código $code.")
+                }
+                val type = connection.contentType.orEmpty().lowercase()
+                if (type.startsWith("text/") || type.contains("json")) {
+                    connection.disconnect()
+                    throw IllegalStateException("O servidor não entregou um vídeo para gravação.")
+                }
+                return connection
+            }
+        }
+        throw IllegalStateException("O servidor redirecionou a gravação muitas vezes.")
+    }
+
+    private fun stopRecording() {
+        val state = recordingState.value
+        if (state !is RecordingState.Recording) return
+        recordingState.value = RecordingState.Stopping(state.source, state.name)
+        recordingCancellation?.set(true)
+        recordingConnection?.disconnect()
+    }
 
     @Composable
     private fun UpdateDialog(state: UpdateState) {
@@ -1552,6 +1731,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         activePlayer?.pause()
+        stopRecording()
         super.onStop()
     }
 
@@ -1559,6 +1739,7 @@ class MainActivity : ComponentActivity() {
         try { unregisterReceiver(downloadReceiver) } catch (_: IllegalArgumentException) {}
         activePlayer?.release(); activePlayer = null
         executor.shutdownNow()
+        recordingExecutor.shutdownNow()
         super.onDestroy()
     }
 }
