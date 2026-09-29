@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -96,6 +97,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import br.com.iptvcaseiro.data.AppDatabase
 import br.com.iptvcaseiro.data.Channel
+import br.com.iptvcaseiro.data.PlaybackProgress
 import br.com.iptvcaseiro.util.BackupCrypto
 import br.com.iptvcaseiro.util.M3uParser
 import br.com.iptvcaseiro.util.VersionUtils
@@ -163,6 +165,7 @@ class MainActivity : ComponentActivity() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private val recordingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val channelsState = mutableStateOf<List<Channel>>(emptyList())
+    private val continueWatchingState = mutableStateOf<List<PlaybackProgress>>(emptyList())
     private val screenState = mutableStateOf(Screen.HOME)
     private val editingState = mutableStateOf<Channel?>(null)
     private val playingState = mutableStateOf<Channel?>(null)
@@ -182,6 +185,7 @@ class MainActivity : ComponentActivity() {
     private val recordingState = mutableStateOf<RecordingState>(RecordingState.Idle)
     private var checkingUpdates = false
     private var activePlayer: ExoPlayer? = null
+    private var activePlaybackChannel: Channel? = null
     private var pendingApk: File? = null
     private var downloadId = -1L
     private var waitingInstallPermission = false
@@ -321,7 +325,7 @@ class MainActivity : ComponentActivity() {
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when (screen) {
-                    Screen.HOME -> HomeScreen(channels)
+                    Screen.HOME -> HomeScreen(channels, continueWatchingState.value)
                     Screen.MANAGE -> ManageScreen(channels)
                     Screen.EDIT -> EditorScreen(editingState.value)
                     Screen.IMPORT -> ImportScreen()
@@ -349,7 +353,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun HomeScreen(channels: List<Channel>) {
+    private fun HomeScreen(channels: List<Channel>, continueWatching: List<PlaybackProgress>) {
         val context = LocalContext.current
         val preferences = remember(context) { context.getSharedPreferences(PREFS, MODE_PRIVATE) }
         var query by rememberSaveable { mutableStateOf("") }
@@ -372,8 +376,28 @@ class MainActivity : ComponentActivity() {
                 (query.isBlank() || it.name.contains(query, true) || it.category.contains(query, true))
         }
         Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (continueWatching.isNotEmpty() && query.isBlank() && !favoritesOnly && category == "Todos") {
+                Text("Continuar assistindo", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(continueWatching, key = { it.source }) { progress ->
+                        Card(
+                            onClick = {
+                                playerReturnScreenState.value = Screen.HOME
+                                playingState.value = channelFromProgress(progress)
+                                screenState.value = Screen.PLAYER
+                            },
+                            modifier = Modifier.width(210.dp).height(90.dp).focusable(),
+                        ) {
+                            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(progress.name, fontWeight = FontWeight.Bold, maxLines = 2)
+                                Text("${formatPlaybackTime(progress.positionMs)} assistidos", color = MaterialTheme.colorScheme.secondary)
+                            }
+                        }
+                    }
+                }
+            }
             OutlinedTextField(query, { query = it }, label = { Text("Pesquisar canais") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            BoxWithConstraints(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                 val availableWidth = maxWidth
                 val sidebarWidth = if (availableWidth >= 600.dp) 190.dp else 128.dp
                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -424,7 +448,12 @@ class MainActivity : ComponentActivity() {
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            items(filtered, key = { it.id }) { channel -> ChannelCard(channel) }
+                            items(filtered, key = { it.id }) { channel ->
+                                ChannelCard(channel) { watchedCategory ->
+                                    lastViewedCategory = watchedCategory
+                                    preferences.edit().putString(LAST_VIEWED_CATEGORY, watchedCategory).apply()
+                                }
+                            }
                         }
                     }
                 }
@@ -466,9 +495,10 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun ChannelCard(channel: Channel) {
+    private fun ChannelCard(channel: Channel, onWatched: (String) -> Unit) {
         Card(
             onClick = {
+                onWatched(channel.category)
                 when (channel.sourceType) {
                     "EXTERNAL" -> openExternalLink(channel.source)
                     "SERIES" -> openSeries(channel)
@@ -630,6 +660,7 @@ class MainActivity : ComponentActivity() {
     private fun ImportScreen() {
         var url by rememberSaveable { mutableStateOf("") }
         var reveal by rememberSaveable { mutableStateOf(false) }
+        var replaceExisting by rememberSaveable { mutableStateOf(false) }
         val preview by playlistPreviewState
         val loading by playlistLoadingState
         var selected by remember(preview) { mutableStateOf(preview.indices.toSet()) }
@@ -662,9 +693,14 @@ class MainActivity : ComponentActivity() {
                     Text("Selecionar todos", modifier = Modifier.weight(1f))
                     Text("${preview.size} encontrados")
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = replaceExisting, onCheckedChange = { replaceExisting = it })
+                    Text("Substituir catálogo atual")
+                }
+                if (replaceExisting) Text("Os canais já cadastrados serão removidos antes da importação.", style = MaterialTheme.typography.bodySmall)
                 Button(
                     enabled = selected.isNotEmpty(),
-                    onClick = { importChannels(preview.filterIndexed { index, _ -> index in selected }) },
+                    onClick = { importChannels(preview.filterIndexed { index, _ -> index in selected }, replaceExisting) },
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Importar ${selected.size} selecionados") }
                 LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -813,6 +849,8 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun PlayerScreen(channel: Channel, playable: List<Channel>) {
         val context = LocalContext.current
+        val isLiveChannel = channel.sourceType == "STREAM" && !isResumableContent(channel.source)
+        var fullScreen by remember(channel.id, channel.source) { mutableStateOf(!isLiveChannel) }
         var playbackError by remember(channel.id, channel.source) { mutableStateOf<String?>(null) }
         var buffering by remember(channel.id, channel.source) { mutableStateOf(true) }
         var controlsVisible by remember(channel.id, channel.source) { mutableStateOf(true) }
@@ -829,6 +867,7 @@ class MainActivity : ComponentActivity() {
         }
         val supportsEpg = remember(channel.source) { parseXtreamLiveAccess(channel.source) != null }
         val channelIndex = playable.indexOfFirst { it.source == channel.source }
+        var resumeApplied = false
         fun changeChannel(offset: Int) {
             if (playable.size > 1 && channelIndex >= 0) {
                 playingState.value = playable[(channelIndex + offset + playable.size) % playable.size]
@@ -853,7 +892,17 @@ class MainActivity : ComponentActivity() {
                         if (playbackState == Player.STATE_READY) {
                             playbackError = null
                             automaticRetries = 0
+                            if (!resumeApplied && isResumableContent(channel.source)) {
+                                resumeApplied = true
+                                executor.execute {
+                                    val progress = AppDatabase.get(this@MainActivity).channelDao().progressFor(channel.source)
+                                    if (progress != null) runOnUiThread {
+                                        if (activePlayer === this@apply) seekTo(progress.positionMs)
+                                    }
+                                }
+                            }
                         }
+                        if (playbackState == Player.STATE_ENDED) clearPlaybackProgress(channel.source)
                     }
 
                     override fun onIsPlayingChanged(playing: Boolean) {
@@ -887,16 +936,22 @@ class MainActivity : ComponentActivity() {
         }
         DisposableEffect(player) {
             activePlayer = player
-            WindowCompat.getInsetsController(window, window.decorView).hide(WindowInsetsCompat.Type.systemBars())
+            activePlaybackChannel = channel
             onDispose {
                 if (activePlayer === player) activePlayer = null
+                savePlaybackProgress(channel, player.currentPosition, player.duration)
+                if (activePlaybackChannel?.source == channel.source) activePlaybackChannel = null
                 val currentRecording = recordingState.value
                 if ((currentRecording is RecordingState.Recording && currentRecording.source == channel.source) ||
                     (currentRecording is RecordingState.Stopping && currentRecording.source == channel.source)
                 ) stopRecording()
                 player.release()
-                WindowCompat.getInsetsController(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
             }
+        }
+        DisposableEffect(fullScreen) {
+            val insets = WindowCompat.getInsetsController(window, window.decorView)
+            if (fullScreen) insets.hide(WindowInsetsCompat.Type.systemBars()) else insets.show(WindowInsetsCompat.Type.systemBars())
+            onDispose { if (fullScreen) insets.show(WindowInsetsCompat.Type.systemBars()) }
         }
         DisposableEffect(channel.id, channel.source) {
             val cancelled = AtomicBoolean(false)
@@ -917,9 +972,17 @@ class MainActivity : ComponentActivity() {
             onDispose { cancelled.set(true) }
         }
         LaunchedEffect(channel.id, channel.source, controlsReset) {
-            delay(3_000)
-            controlsVisible = false
-            playerView?.hideController()
+            if (fullScreen) {
+                delay(3_000)
+                controlsVisible = false
+                playerView?.hideController()
+            } else controlsVisible = true
+        }
+        LaunchedEffect(player) {
+            while (true) {
+                delay(5_000)
+                savePlaybackProgress(channel, player.currentPosition, player.duration)
+            }
         }
         Box(Modifier.fillMaxSize()) {
             AndroidView(
@@ -938,8 +1001,15 @@ class MainActivity : ComponentActivity() {
                         setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                     }
                 },
-                modifier = Modifier.fillMaxSize(),
+                modifier = if (fullScreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(260.dp).align(Alignment.TopCenter).padding(top = 76.dp),
             )
+            if (!fullScreen) {
+                Column(Modifier.align(Alignment.TopStart).padding(16.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("Prévia do canal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(channel.name)
+                    Text("Confira a programação e toque em Tela cheia para assistir.", color = MaterialTheme.colorScheme.secondary)
+                }
+            }
             if (buffering && playbackError == null) {
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
             }
@@ -970,6 +1040,7 @@ class MainActivity : ComponentActivity() {
                     Modifier.align(Alignment.TopCenter).padding(12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    if (!fullScreen) Button(onClick = { fullScreen = true }) { Text("Tela cheia") }
                     Button(onClick = {
                         controlsReset += 1
                         if (player.isPlaying) player.pause() else player.play()
@@ -1247,9 +1318,64 @@ class MainActivity : ComponentActivity() {
 
     private fun loadChannels(after: (() -> Unit)? = null) {
         executor.execute {
-            val rows = AppDatabase.get(this).channelDao().all()
-            runOnUiThread { channelsState.value = rows; after?.invoke() }
+            val dao = AppDatabase.get(this).channelDao()
+            val rows = dao.all()
+            val continueWatching = dao.continueWatching(20)
+            runOnUiThread {
+                channelsState.value = rows
+                continueWatchingState.value = continueWatching
+                after?.invoke()
+            }
         }
+    }
+
+    private fun isResumableContent(source: String): Boolean =
+        source.startsWith("content://") || Regex("/(movie|series)/", RegexOption.IGNORE_CASE).containsMatchIn(source)
+
+    private fun savePlaybackProgress(channel: Channel, positionMs: Long, durationMs: Long) {
+        if (!isResumableContent(channel.source)) return
+        executor.execute {
+            val dao = AppDatabase.get(this).channelDao()
+            if (positionMs < 10_000 || (durationMs > 0 && positionMs >= durationMs - 30_000)) {
+                dao.deleteProgress(channel.source)
+            } else {
+                dao.saveProgress(PlaybackProgress().apply {
+                    source = channel.source
+                    name = channel.name
+                    category = channel.category
+                    logoUrl = channel.logoUrl
+                    sourceType = channel.sourceType
+                    this.positionMs = positionMs
+                    this.durationMs = durationMs.coerceAtLeast(0)
+                    updatedAt = System.currentTimeMillis()
+                })
+            }
+            val continueWatching = dao.continueWatching(20)
+            runOnUiThread { continueWatchingState.value = continueWatching }
+        }
+    }
+
+    private fun clearPlaybackProgress(source: String) {
+        if (!isResumableContent(source)) return
+        executor.execute {
+            val dao = AppDatabase.get(this).channelDao()
+            dao.deleteProgress(source)
+            val continueWatching = dao.continueWatching(20)
+            runOnUiThread { continueWatchingState.value = continueWatching }
+        }
+    }
+
+    private fun channelFromProgress(progress: PlaybackProgress) = Channel().apply {
+        name = progress.name; category = progress.category; logoUrl = progress.logoUrl
+        sourceType = progress.sourceType; source = progress.source; active = true
+    }
+
+    private fun formatPlaybackTime(positionMs: Long): String {
+        val totalSeconds = (positionMs / 1_000).coerceAtLeast(0)
+        val hours = totalSeconds / 3_600
+        val minutes = (totalSeconds % 3_600) / 60
+        val seconds = totalSeconds % 60
+        return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds) else "%d:%02d".format(minutes, seconds)
     }
 
     private fun openExternalLinkEditor(value: String = "") {
@@ -1445,6 +1571,9 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                val resumedSources = AppDatabase.get(this).channelDao().continueWatching(50)
+                    .map { it.source }.toSet()
+                episodes.sortWith(compareByDescending<Channel> { it.source in resumedSources }.thenBy { it.category }.thenBy { it.name })
                 runOnUiThread {
                     seriesEpisodesState.value = episodes
                     seriesLoadingState.value = false
@@ -1463,10 +1592,11 @@ class MainActivity : ComponentActivity() {
         playlistLoadingState.value = false
     }
 
-    private fun importChannels(channels: List<Channel>) {
+    private fun importChannels(channels: List<Channel>, replaceExisting: Boolean = false) {
         playlistLoadingState.value = true
         executor.execute {
             val dao = AppDatabase.get(this).channelDao()
+            if (replaceExisting) dao.deleteAll()
             var added = 0
             channels.chunked(1_000).forEach { batch -> added += dao.insertAll(batch).count { it != -1L } }
             val duplicates = channels.size - added
@@ -1730,6 +1860,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        activePlaybackChannel?.let { channel ->
+            activePlayer?.let { player -> savePlaybackProgress(channel, player.currentPosition, player.duration) }
+        }
         activePlayer?.pause()
         stopRecording()
         super.onStop()

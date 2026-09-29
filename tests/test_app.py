@@ -133,6 +133,28 @@ https://example.com/b.m3u8
             ).fetchone()[0]
         self.assertEqual(imported_count, 2)
 
+    def test_import_m3u_can_replace_the_current_catalog(self) -> None:
+        playlist = """#EXTM3U
+#EXTINF:-1 group-title="Novo",Canal novo
+https://example.com/new.m3u8
+"""
+        with patch("app.fetch_playlist", return_value=playlist):
+            response = self.client.post(
+                "/admin/importar",
+                data={
+                    "url": "https://example.com/new.m3u",
+                    "action": "import",
+                    "selected": ["0"],
+                    "replace_existing": "1",
+                },
+                follow_redirects=True,
+            )
+
+        self.assertIn("Catálogo anterior substituído.".encode(), response.data)
+        with iptv.database_connection() as database:
+            channels = database.execute("SELECT nome FROM canais").fetchall()
+        self.assertEqual([channel["nome"] for channel in channels], ["Canal novo"])
+
     def test_rejects_invalid_m3u_content(self) -> None:
         with self.assertRaises(PlaylistImportError):
             parse_playlist("isto não é uma playlist")

@@ -37,6 +37,15 @@
           </button>
         </form>
       </div>
+      {% if categories %}
+        <form class="folder-delete-form" method="post" action="{{ url_for('delete_folder') }}" data-confirm="Excluir a pasta selecionada e todos os seus canais, inclusive favoritos?">
+          <label for="folder-delete-select">Pasta</label>
+          <select id="folder-delete-select" name="categoria">
+            {% for category in categories %}<option value="{{ category.categoria }}">{{ category.categoria }}</option>{% endfor %}
+          </select>
+          <button class="bulk-delete-button" type="submit"><i class="bi bi-folder-x"></i><span>Excluir pasta</span></button>
+        </form>
+      {% endif %}
       {% if channels %}
         <label class="admin-select-all"><input type="checkbox" id="admin-select-all"><span>Selecionar todos</span></label>
       {% endif %}

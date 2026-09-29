@@ -5,6 +5,9 @@ const volumeDown = document.querySelector("#volume-down");
 const volumeUp = document.querySelector("#volume-up");
 const volumeToggle = document.querySelector("#volume-toggle");
 const volumeLevel = document.querySelector("#volume-level");
+const playerShell = document.querySelector("#player-shell");
+const playToggle = document.querySelector("#play-toggle");
+const programGuide = document.querySelector("#program-guide");
 
 if (video) {
   const source = video.dataset.source;
@@ -39,6 +42,66 @@ if (video) {
   });
   video.addEventListener("volumechange", updateVolumeDisplay);
   updateVolumeDisplay();
+
+  function updatePlayButton() {
+    const paused = video.paused;
+    const icon = playToggle?.querySelector("i");
+    if (icon) icon.className = `bi ${paused ? "bi-play-fill" : "bi-pause-fill"}`;
+    if (playToggle) {
+      playToggle.title = paused ? "Continuar" : "Pausar";
+      playToggle.setAttribute("aria-label", playToggle.title);
+    }
+  }
+
+  playToggle?.addEventListener("click", () => {
+    if (video.paused) video.play().catch(() => {});
+    else video.pause();
+  });
+  video.addEventListener("play", updatePlayButton);
+  video.addEventListener("pause", updatePlayButton);
+  updatePlayButton();
+
+  let controlsTimer;
+  function resetControlsTimer() {
+    if (!playerShell) return;
+    playerShell.classList.remove("controls-hidden");
+    window.clearTimeout(controlsTimer);
+    controlsTimer = window.setTimeout(() => playerShell.classList.add("controls-hidden"), 3000);
+  }
+  ["pointermove", "pointerdown", "touchstart", "keydown"].forEach((eventName) => {
+    playerShell?.addEventListener(eventName, resetControlsTimer, { passive: true });
+  });
+  resetControlsTimer();
+
+  function formatTime(seconds) {
+    return new Date(seconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function appendProgram(label, program) {
+    if (!programGuide || !program) return;
+    const heading = document.createElement("small");
+    heading.textContent = `${label} · ${formatTime(program.start)}–${formatTime(program.end)}`;
+    const title = document.createElement("strong");
+    title.textContent = program.title;
+    programGuide.append(heading, title);
+  }
+
+  async function loadProgramGuide() {
+    if (!programGuide?.dataset.url) return;
+    try {
+      const response = await fetch(programGuide.dataset.url, { headers: { Accept: "application/json" } });
+      if (!response.ok) return;
+      const guide = await response.json();
+      if (!guide.current && !guide.next) return;
+      programGuide.replaceChildren();
+      appendProgram("Agora", guide.current);
+      appendProgram("A seguir", guide.next);
+      programGuide.hidden = false;
+    } catch (_) {
+      // O guia é opcional e nunca interfere na reprodução.
+    }
+  }
+  loadProgramGuide();
 
   function ready() {
     loading?.setAttribute("hidden", "");

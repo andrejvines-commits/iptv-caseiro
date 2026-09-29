@@ -81,6 +81,17 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 44px); line-height: 1.05; letter-spa
 .video-stage { position: relative; aspect-ratio: 16 / 9; display: grid; place-items: center; overflow: hidden; background: #000; border: 1px solid var(--line); border-radius: 8px; }
 .video-stage video { width: 100%; height: 100%; }
 .tv-controls { min-height: 64px; padding: 10px 12px; display: grid; grid-template-columns: 1fr minmax(0, 2fr) 1fr; align-items: center; gap: 14px; background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 8px 8px; }
+.video-stage > .tv-controls { position: absolute; right: 0; bottom: 0; left: 0; z-index: 3; border: 0; border-radius: 0; background: linear-gradient(transparent, rgba(8, 10, 11, .94) 35%); transition: opacity .22s ease, transform .22s ease; }
+.program-guide { position: absolute; bottom: 76px; left: 14px; z-index: 3; max-width: min(560px, calc(100% - 150px)); padding: 10px 12px; background: rgba(16, 19, 21, .92); border: 1px solid var(--line); border-radius: 6px; line-height: 1.35; transition: opacity .22s ease, transform .22s ease; }
+.program-guide[hidden] { display: none; }
+.program-guide small { display: block; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.program-guide strong, .program-guide span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.program-guide strong + small { margin-top: 8px; }
+.recording-indicator { position: absolute; top: 14px; right: 14px; z-index: 4; color: #ff6257; font-size: 13px; font-weight: 800; text-shadow: 0 1px 3px #000; }
+.record-button { color: #ff7468; }
+.record-button.is-recording { color: white; background: #b8372d; border-color: #b8372d; }
+.tv-control-group form { margin: 0; }
+.player-shell.controls-hidden .video-stage > .tv-controls, .player-shell.controls-hidden .program-guide { opacity: 0; pointer-events: none; transform: translateY(10px); }
 .tv-control-group { display: flex; align-items: center; gap: 6px; }
 .volume-controls { justify-content: flex-end; }
 .control-label { margin-right: 3px; color: var(--muted); font-size: 11px; font-weight: 750; text-transform: uppercase; }
@@ -127,6 +138,9 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 44px); line-height: 1.05; letter-spa
 .bulk-delete-button:hover:not(:disabled) { color: white; background: #b8372d; border-color: #b8372d; }
 .bulk-delete-button:disabled { opacity: .35; cursor: not-allowed; }
 .bulk-delete-button b { font-weight: 800; }
+.folder-delete-form { margin: 0 0 12px; padding: 10px 0 14px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+.folder-delete-form label { color: var(--muted); font-size: 12px; font-weight: 700; }
+.folder-delete-form select { min-width: 0; flex: 1; padding: 8px; color: var(--text); background: #101416; border: 1px solid var(--line); border-radius: 5px; }
 .admin-select-all { min-height: 38px; padding: 0 6px; display: flex; align-items: center; gap: 9px; color: var(--muted); border-bottom: 1px solid var(--line); font-size: 12px; cursor: pointer; }
 .admin-select-all input, .admin-channel-checkbox { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
 .admin-channel-checkbox:disabled { opacity: .4; cursor: not-allowed; }
@@ -204,6 +218,8 @@ h1 { margin: 0; font-size: clamp(28px, 4vw, 44px); line-height: 1.05; letter-spa
   .content, .admin-page, .player-page { padding: 25px 16px; }
   .channel-grid { grid-template-columns: 1fr; }
   .list-heading { align-items: flex-start; flex-direction: column; }
+  .folder-delete-form { align-items: stretch; flex-wrap: wrap; }
+  .folder-delete-form label { width: 100%; }
   .admin-channel { grid-template-columns: 20px 42px minmax(0, 1fr); }
   .status-pill { display: none; }
   .row-actions { grid-column: 3 / -1; justify-content: flex-end; }

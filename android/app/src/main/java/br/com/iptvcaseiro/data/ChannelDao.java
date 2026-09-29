@@ -31,4 +31,16 @@ public interface ChannelDao {
 
     @Query("DELETE FROM channels")
     void deleteAll();
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void saveProgress(PlaybackProgress progress);
+
+    @Query("SELECT * FROM playback_progress WHERE positionMs > 10000 AND (durationMs = 0 OR positionMs < durationMs - 30000) ORDER BY updatedAt DESC LIMIT :limit")
+    List<PlaybackProgress> continueWatching(int limit);
+
+    @Query("SELECT * FROM playback_progress WHERE source = :source LIMIT 1")
+    PlaybackProgress progressFor(String source);
+
+    @Query("DELETE FROM playback_progress WHERE source = :source")
+    void deleteProgress(String source);
 }

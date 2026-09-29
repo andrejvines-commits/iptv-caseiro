@@ -19,6 +19,7 @@
     </div>
   </div>
 
+  <div class="player-shell" id="player-shell">
   <section class="video-stage">
     {% if source_available %}
       <video id="video-player" controls playsinline preload="metadata" data-source="{{ source }}" data-type="{{ channel.tipo }}"></video>
@@ -35,9 +36,11 @@
         <p>Coloque <strong>{{ channel.fonte }}</strong> na pasta <strong>videos</strong> e recarregue esta página.</p>
       </div>
     {% endif %}
-  </section>
-  <nav class="tv-controls" aria-label="Controles de canal e volume">
+    <div class="program-guide" id="program-guide" data-url="{{ url_for('channel_epg', channel_id=channel.id) }}" hidden aria-live="polite"></div>
+    {% if recording and recording.channel_id == channel.id %}<span class="recording-indicator"><i class="bi bi-record-circle-fill"></i> REC</span>{% endif %}
+  <nav class="tv-controls" aria-label="Controles de reprodução, canal e volume">
     <div class="tv-control-group">
+      <button class="control-button" id="play-toggle" type="button" title="Pausar" aria-label="Pausar"><i class="bi bi-pause-fill"></i></button>
       <span class="control-label">Canal</span>
       {% if previous_channel %}
         <a class="control-button" href="{{ url_for('player', channel_id=previous_channel.id, autoplay=1) }}" title="Canal anterior: {{ previous_channel.nome }}" aria-label="Canal anterior: {{ previous_channel.nome }}"><i class="bi bi-chevron-down"></i></a>
@@ -49,6 +52,11 @@
     </div>
     <div class="now-playing"><i class="bi bi-broadcast"></i><span>{{ channel.nome }}</span></div>
     <div class="tv-control-group volume-controls">
+      {% if recording and recording.channel_id == channel.id %}
+        <form method="post" action="{{ url_for('stop_channel_recording', channel_id=channel.id) }}"><button class="control-button record-button is-recording" type="submit" title="Parar gravação" aria-label="Parar gravação"><i class="bi bi-stop-fill"></i></button></form>
+      {% else %}
+        <form method="post" action="{{ url_for('record_channel', channel_id=channel.id) }}"><button class="control-button record-button" type="submit" title="Gravar" aria-label="Gravar" {{ 'disabled' if not recording_supported or recording else '' }}><i class="bi bi-record-circle"></i></button></form>
+      {% endif %}
       <span class="control-label">Volume</span>
       <button class="control-button" id="volume-down" type="button" title="Diminuir volume" aria-label="Diminuir volume"><i class="bi bi-volume-down-fill"></i></button>
       <button class="control-button" id="volume-toggle" type="button" title="Ativar ou desativar som" aria-label="Ativar ou desativar som"><i class="bi bi-volume-up-fill"></i></button>
@@ -56,6 +64,8 @@
       <output id="volume-level" aria-live="polite">100%</output>
     </div>
   </nav>
+  </section>
+  </div>
   {% if channel.descricao %}<p class="player-description">{{ channel.descricao }}</p>{% endif %}
   {% if not ffmpeg_available %}
     <p class="ffmpeg-note"><i class="bi bi-info-circle"></i> FFmpeg não está instalado. A reprodução compatível com o navegador continua disponível; conversões avançadas ficam desativadas.</p>

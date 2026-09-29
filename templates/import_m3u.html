@@ -25,6 +25,8 @@
         <strong>{{ channels|length }} canais encontrados</strong>
         <button class="primary-button" type="submit" name="action" value="import"><i class="bi bi-plus-lg"></i><span>Importar selecionados</span></button>
       </div>
+      <label class="check-all"><input type="checkbox" name="replace_existing" value="1"><span>Substituir catálogo atual</span></label>
+      <p>Ao marcar esta opção, todos os canais cadastrados serão removidos antes da importação.</p>
       <div class="import-list">
         {% for channel in channels %}
           <label class="import-channel">
