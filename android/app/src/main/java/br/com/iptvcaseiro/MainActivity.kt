@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -362,8 +363,11 @@ class MainActivity : ComponentActivity() {
         var lastViewedCategory by rememberSaveable {
             mutableStateOf(preferences.getString(LAST_VIEWED_CATEGORY, "").orEmpty())
         }
-        var folderToDelete by remember { mutableStateOf<String?>(null) }
+        var foldersToDelete by remember { mutableStateOf<Set<String>?>(null) }
         val activeChannels = remember(channels) { channels.filter { it.active } }
+        val deletableFolders = remember(channels) {
+            channels.map { it.category }.distinct().filterNot { it.equals("Todos", true) }.sorted()
+        }
         val categoryCounts = remember(activeChannels) { activeChannels.groupingBy { it.category }.eachCount() }
         val categories = remember(categoryCounts, lastViewedCategory) {
             val folders = categoryCounts.keys.filterNot { it.equals("Todos", true) }
@@ -429,11 +433,11 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
-                        if (category != "Todos") {
+                        if (deletableFolders.isNotEmpty()) {
                             OutlinedButton(
-                                onClick = { folderToDelete = category },
+                                onClick = { foldersToDelete = emptySet() },
                                 modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Excluir pasta") }
+                            ) { Text("Excluir pastas") }
                         }
                     }
                     if (filtered.isEmpty()) {
@@ -459,25 +463,77 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        folderToDelete?.let { folder ->
-            val ids = channels.filter { it.category == folder }.map { it.id }.toSet()
+        foldersToDelete?.let { selectedFolders ->
+            val ids = channels.filter { it.category in selectedFolders }.map { it.id }.toSet()
             AlertDialog(
-                onDismissRequest = { folderToDelete = null },
-                title = { Text("Excluir pasta") },
-                text = { Text("Excluir a pasta “$folder” e seus ${ids.size} itens? Esta ação não pode ser desfeita.") },
+                onDismissRequest = { foldersToDelete = null },
+                title = { Text("Selecionar pastas para excluir") },
+                text = {
+                    Column(
+                        Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = selectedFolders.size == deletableFolders.size,
+                                onCheckedChange = {
+                                    foldersToDelete = if (selectedFolders.size == deletableFolders.size) {
+                                        emptySet()
+                                    } else {
+                                        deletableFolders.toSet()
+                                    }
+                                },
+                            )
+                            Text("Selecionar todas as pastas")
+                        }
+                        deletableFolders.forEach { folder ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    foldersToDelete = if (folder in selectedFolders) {
+                                        selectedFolders - folder
+                                    } else {
+                                        selectedFolders + folder
+                                    }
+                                },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = folder in selectedFolders,
+                                    onCheckedChange = { checked ->
+                                        foldersToDelete = if (checked) {
+                                            selectedFolders + folder
+                                        } else {
+                                            selectedFolders - folder
+                                        }
+                                    },
+                                )
+                                Text(folder, maxLines = 2)
+                            }
+                        }
+                        if (selectedFolders.isNotEmpty()) {
+                            Text(
+                                "Serão excluídos ${selectedFolders.size} pasta(s) e ${ids.size} canal(is). Esta ação não pode ser desfeita.",
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                },
                 dismissButton = {
-                    TextButton(onClick = { folderToDelete = null }) { Text("Cancelar") }
+                    TextButton(onClick = { foldersToDelete = null }) { Text("Cancelar") }
                 },
                 confirmButton = {
-                    TextButton(onClick = {
-                        folderToDelete = null
-                        category = "Todos"
-                        if (folder.equals(lastViewedCategory, ignoreCase = true)) {
-                            lastViewedCategory = ""
-                            preferences.edit().remove(LAST_VIEWED_CATEGORY).apply()
-                        }
-                        deleteChannels(ids)
-                    }) { Text("Excluir") }
+                    TextButton(
+                        enabled = selectedFolders.isNotEmpty(),
+                        onClick = {
+                            foldersToDelete = null
+                            category = "Todos"
+                            if (lastViewedCategory in selectedFolders) {
+                                lastViewedCategory = ""
+                                preferences.edit().remove(LAST_VIEWED_CATEGORY).apply()
+                            }
+                            deleteChannels(ids)
+                        },
+                    ) { Text("Excluir selecionadas") }
                 },
             )
         }
