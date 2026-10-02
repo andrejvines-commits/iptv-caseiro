@@ -914,6 +914,9 @@ class MainActivity : ComponentActivity() {
         var playerView by remember(channel.id, channel.source) { mutableStateOf<PlayerView?>(null) }
         var automaticRetries by remember(channel.id, channel.source) { mutableIntStateOf(0) }
         var isPlaying by remember(channel.id, channel.source) { mutableStateOf(false) }
+        var showChannelList by remember(channel.id, channel.source) { mutableStateOf(false) }
+        var channelListQuery by remember(channel.id, channel.source) { mutableStateOf("") }
+        var channelListCategory by remember(channel.id, channel.source) { mutableStateOf("Todos") }
         var epgSchedule by remember(channel.id, channel.source) { mutableStateOf<EpgSchedule?>(null) }
         var epgLoading by remember(channel.id, channel.source) { mutableStateOf(false) }
         val recording = recordingState.value
@@ -923,6 +926,17 @@ class MainActivity : ComponentActivity() {
         }
         val supportsEpg = remember(channel.source) { parseXtreamLiveAccess(channel.source) != null }
         val channelIndex = playable.indexOfFirst { it.source == channel.source }
+        val channelCategories = remember(playable) {
+            listOf("Todos") + playable.map { it.category }.distinct().sorted()
+        }
+        val visibleChannels = remember(playable, channelListCategory, channelListQuery) {
+            playable.filter {
+                (channelListCategory == "Todos" || it.category == channelListCategory) &&
+                    (channelListQuery.isBlank() ||
+                        it.name.contains(channelListQuery, ignoreCase = true) ||
+                        it.category.contains(channelListQuery, ignoreCase = true))
+            }
+        }
         var resumeApplied = false
         fun changeChannel(offset: Int) {
             if (playable.size > 1 && channelIndex >= 0) {
@@ -1101,6 +1115,12 @@ class MainActivity : ComponentActivity() {
                         controlsReset += 1
                         if (player.isPlaying) player.pause() else player.play()
                     }) { Text(if (isPlaying) "Pausar" else "Continuar") }
+                    if (playable.size > 1) {
+                        Button(onClick = {
+                            showChannelList = !showChannelList
+                            controlsReset += 1
+                        }) { Text(if (showChannelList) "Fechar canais" else "Canais") }
+                    }
                     Button(
                         enabled = recording is RecordingState.Idle || recordingThisChannel,
                         onClick = {
@@ -1142,6 +1162,91 @@ class MainActivity : ComponentActivity() {
                                     epgSchedule?.next?.let { program ->
                                         Text("A seguir · ${formatEpgPeriod(program)}", color = MaterialTheme.colorScheme.secondary)
                                         Text(program.title, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (showChannelList) {
+                Card(
+                    Modifier.align(Alignment.CenterEnd)
+                        .padding(8.dp)
+                        .width(320.dp)
+                        .fillMaxHeight(),
+                ) {
+                    Column(
+                        Modifier.fillMaxSize().padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Canais", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text("${visibleChannels.size} disponíveis", color = MaterialTheme.colorScheme.secondary)
+                            }
+                            TextButton(onClick = { showChannelList = false }) { Text("Fechar") }
+                        }
+                        OutlinedTextField(
+                            value = channelListQuery,
+                            onValueChange = { channelListQuery = it },
+                            label = { Text("Buscar canal") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(channelCategories) { folder ->
+                                FilterChip(
+                                    selected = channelListCategory == folder,
+                                    onClick = { channelListCategory = folder },
+                                    label = { Text(folder, maxLines = 1) },
+                                )
+                            }
+                        }
+                        if (visibleChannels.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Nenhum canal nesta busca.")
+                            }
+                        } else {
+                            LazyColumn(
+                                Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                itemsIndexed(visibleChannels, key = { _, item -> item.source }) { _, item ->
+                                    val itemIndex = playable.indexOfFirst { it.source == item.source }
+                                    val isCurrent = item.source == channel.source
+                                    Card(
+                                        onClick = {
+                                            if (!isCurrent) {
+                                                playingState.value = item
+                                                channelListQuery = ""
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth().focusable(),
+                                        colors = androidx.compose.material3.CardDefaults.cardColors(
+                                            containerColor = if (isCurrent) {
+                                                MaterialTheme.colorScheme.primaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.surfaceVariant
+                                            },
+                                        ),
+                                    ) {
+                                        Row(
+                                            Modifier.fillMaxWidth().padding(10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                        ) {
+                                            Text(
+                                                (itemIndex + 1).toString().padStart(2, '0'),
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold,
+                                            )
+                                            Column(Modifier.weight(1f)) {
+                                                Text(item.name, fontWeight = FontWeight.Bold, maxLines = 1)
+                                                Text(item.category, color = MaterialTheme.colorScheme.secondary, maxLines = 1)
+                                            }
+                                            if (isCurrent) Text("▶", color = MaterialTheme.colorScheme.primary)
+                                        }
                                     }
                                 }
                             }

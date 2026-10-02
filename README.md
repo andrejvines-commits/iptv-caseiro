@@ -85,7 +85,7 @@ Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, links externos, escol
 
 A versão 2.0.8 inclui um catálogo privado criptografado com AES-256-GCM. Na primeira abertura, o aplicativo exige a senha definida fora do código-fonte para descriptografar e importar esse catálogo. A senha não é armazenada no APK nem no repositório.
 
-O aplicativo também oferece pesquisa e pastas de categorias visíveis e clicáveis em uma barra vertical à esquerda, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha. A reprodução é pausada quando o aplicativo sai do primeiro plano.
+O aplicativo também oferece pesquisa e pastas de categorias visíveis e clicáveis em uma barra vertical à esquerda, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha. Durante a reprodução, o botão **Canais** abre um painel com busca, filtro por pasta e troca direta de canal sem voltar ao catálogo. A reprodução é pausada quando o aplicativo sai do primeiro plano.
 
 Na versão 2.0.10, o catálogo criptografado foi renovado pela API de categorias do provedor e contém 1.163 itens, incluindo 24 canais na pasta Telecine. A nova revisão do catálogo solicita novamente a senha na primeira abertura para mesclar os canais e ignorar duplicatas.
 
