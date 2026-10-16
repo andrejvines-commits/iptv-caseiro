@@ -41,6 +41,9 @@ public interface ChannelDao {
     @Query("SELECT * FROM playback_progress WHERE source = :source LIMIT 1")
     PlaybackProgress progressFor(String source);
 
+    @Query("SELECT * FROM playback_progress WHERE source IN (:sources) AND positionMs > 10000 AND (durationMs = 0 OR positionMs < durationMs - 30000) ORDER BY updatedAt DESC LIMIT 1")
+    PlaybackProgress latestProgressForSources(List<String> sources);
+
     @Query("DELETE FROM playback_progress WHERE source = :source")
     void deleteProgress(String source);
 }

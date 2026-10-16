@@ -1732,12 +1732,28 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-                val resumedSources = AppDatabase.get(this).channelDao().continueWatching(50)
+                val dao = AppDatabase.get(this).channelDao()
+                val resumedSources = dao.continueWatching(50)
                     .map { it.source }.toSet()
                 episodes.sortWith(compareByDescending<Channel> { it.source in resumedSources }.thenBy { it.category }.thenBy { it.name })
+                val latestProgress = episodes.map { it.source }
+                    .chunked(900)
+                    .mapNotNull { dao.latestProgressForSources(it) }
+                    .maxByOrNull { it.updatedAt }
+                val resumeEpisode = latestProgress?.let { progress ->
+                    episodes.firstOrNull { it.source == progress.source }
+                }
                 runOnUiThread {
                     seriesEpisodesState.value = episodes
                     seriesLoadingState.value = false
+                    if (resumeEpisode != null &&
+                        screenState.value == Screen.SERIES &&
+                        seriesState.value?.source == series.source
+                    ) {
+                        playerReturnScreenState.value = Screen.SERIES
+                        playingState.value = resumeEpisode
+                        screenState.value = Screen.PLAYER
+                    }
                 }
             } catch (error: Exception) {
                 runOnUiThread {
