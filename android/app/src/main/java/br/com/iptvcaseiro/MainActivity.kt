@@ -106,6 +106,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -143,6 +144,13 @@ private const val LAST_VIEWED_CATEGORY = "last_viewed_category"
 private const val BUNDLED_CATALOG_ASSET = "bundled-catalog.iptvbak"
 private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_2"
 private const val DAY_MS = 24L * 60L * 60L * 1000L
+
+// Uma margem maior absorve oscilações de rede nos canais ao vivo. Os valores
+// também limitam a memória ocupada: o player conserva no máximo 90 segundos.
+private const val MIN_BUFFER_MS = 30_000
+private const val MAX_BUFFER_MS = 90_000
+private const val START_PLAYBACK_BUFFER_MS = 8_000
+private const val RESUME_PLAYBACK_BUFFER_MS = 12_000
 
 private enum class Screen { HOME, FOLDER, MANAGE, EDIT, IMPORT, BACKUP, SERIES, PLAYER }
 
@@ -1631,7 +1639,18 @@ class MainActivity : ComponentActivity() {
             .setReadTimeoutMs(60_000)
         val mediaSourceFactory = DefaultMediaSourceFactory(context)
             .setDataSourceFactory(DefaultDataSource.Factory(context, httpDataSource))
-        return ExoPlayer.Builder(context).setMediaSourceFactory(mediaSourceFactory).build()
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                MIN_BUFFER_MS,
+                MAX_BUFFER_MS,
+                START_PLAYBACK_BUFFER_MS,
+                RESUME_PLAYBACK_BUFFER_MS,
+            )
+            .build()
+        return ExoPlayer.Builder(context)
+            .setMediaSourceFactory(mediaSourceFactory)
+            .setLoadControl(loadControl)
+            .build()
     }
 
     private fun parseXtreamLiveAccess(value: String): XtreamLiveAccess? {

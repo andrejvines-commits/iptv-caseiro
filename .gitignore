@@ -9,6 +9,7 @@ database/*.db-journal
 database/*.db-shm
 database/*.db-wal
 android/.gradle/
+.gradle/
 android/local.properties
 android/release.keystore
 android/app/build/
