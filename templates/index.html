@@ -34,15 +34,16 @@
 {% endmacro %}
 <div class="app-shell">
   <aside class="sidebar" aria-label="Categorias">
-    <p class="section-label">Categorias</p>
-    <a class="category-link {{ 'active' if not selected_category and not favorites_only else '' }}" href="{{ url_for('index', q=search) }}">
+    <p class="section-label">Pastas</p>
+    <p class="sidebar-hint">Clique duas vezes para abrir com prévia</p>
+    <a class="category-link {{ 'active' if not selected_category and not favorites_only else '' }}" href="{{ url_for('index', q=search) }}" data-folder-url="{{ url_for('folder_view') }}">
       <i class="bi bi-collection-play"></i><span>Todos os canais</span>
     </a>
-    <a class="category-link favorite-folder {{ 'active' if favorites_only else '' }}" href="{{ url_for('index', favoritos=1, q=search) }}">
-      <i class="bi bi-folder-star"></i><span>Favoritos</span><b>{{ favorite_count }}</b>
+    <a class="category-link favorite-folder {{ 'active' if favorites_only else '' }}" href="{{ url_for('index', favoritos=1, q=search) }}" data-folder-url="{{ url_for('folder_view', favoritos=1) }}">
+      <i class="bi bi-star-fill"></i><span>Favoritos</span><b>{{ favorite_count }}</b>
     </a>
     {% for category in categories %}
-      <a class="category-link {{ 'active' if selected_category == category and not favorites_only else '' }}" href="{{ url_for('index', categoria=category, q=search) }}">
+      <a class="category-link {{ 'active' if selected_category == category and not favorites_only else '' }}" href="{{ url_for('index', categoria=category, q=search) }}" data-folder-url="{{ url_for('folder_view', nome=category) }}">
         <i class="bi bi-folder2"></i><span>{{ category }}</span>
       </a>
     {% endfor %}

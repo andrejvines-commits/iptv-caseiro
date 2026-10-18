@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} | IPTV Caseiro{% endblock %}
+{% block content %}
+<main class="folder-page">
+  <a class="back-link" href="{{ url_for('index', categoria=folder) if folder else url_for('index') }}"><i class="bi bi-arrow-left"></i><span>Voltar aos canais</span></a>
+  <div class="folder-layout">
+    <section class="preview-panel" aria-label="Prévia">
+      <div class="preview-stage" id="preview-stage">
+        <video id="preview-video" playsinline preload="none"></video>
+        <span class="preview-badge" id="preview-badge" hidden>PRÉVIA</span>
+        <div class="preview-message" id="preview-message">
+          <i class="bi bi-play-circle"></i>
+          <span>{{ 'Selecione um canal para ver a prévia' if items else 'Esta pasta está vazia' }}</span>
+        </div>
+        <div class="player-loading" id="preview-loading" hidden><span class="spinner"></span><span>Carregando prévia...</span></div>
+      </div>
+      <div class="preview-info">
+        <div class="preview-title">
+          <div>
+            <p class="eyebrow" id="preview-category"></p>
+            <h2 id="preview-name"></h2>
+          </div>
+          <span class="type-badge" id="preview-type" hidden></span>
+        </div>
+        <div class="preview-guide" id="preview-guide" hidden aria-live="polite"></div>
+        <div class="preview-actions" id="preview-actions" hidden>
+          <button class="watch-button" id="preview-fullscreen" type="button"><i class="bi bi-arrows-fullscreen"></i><span>Tela cheia</span></button>
+          <a class="secondary-button" id="preview-open" href="#"><i class="bi bi-display"></i><span>Abrir no player</span></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="folder-list" aria-labelledby="folder-heading">
+      <div class="folder-heading">
+        <p class="eyebrow"><i class="bi {{ 'bi-star-fill' if favorites_only else 'bi-folder2-open' }}"></i> Pasta</p>
+        <h1 id="folder-heading">{{ title }}</h1>
+        <p class="folder-hint">{{ items|length }} itens · clique para pré-visualizar, clique duas vezes para tela cheia</p>
+      </div>
+      <label class="search folder-search">
+        <i class="bi bi-search"></i>
+        <input id="folder-search" type="search" placeholder="Buscar nesta pasta" aria-label="Buscar nesta pasta">
+      </label>
+      <ul class="folder-items" id="folder-items">
+        {% for item in items %}
+          {% set channel = item.channel %}
+          <li>
+            <button class="folder-item" type="button"
+              data-name="{{ channel.nome }}"
+              data-category="{{ channel.categoria }}"
+              data-type="{{ channel.tipo }}"
+              data-source="{{ item.source }}"
+              data-available="{{ '1' if item.available else '0' }}"
+              data-player-url="{{ url_for('open_external_channel', channel_id=channel.id) if channel.tipo == 'externo' else url_for('player', channel_id=channel.id, autoplay=1, pasta=folder or None) }}"
+              data-epg-url="{{ url_for('channel_epg', channel_id=channel.id) if channel.tipo == 'stream' else '' }}">
+              <span class="folder-item-logo">
+                {% if channel.logo %}<img src="{{ channel.logo }}" alt="" loading="lazy">{% else %}<i class="bi bi-tv"></i>{% endif %}
+              </span>
+              <span class="folder-item-copy">
+                <strong>{{ channel.nome }}</strong>
+                <small>{{ 'Arquivo' if channel.tipo == 'arquivo' else ('Link oficial' if channel.tipo == 'externo' else 'Ao vivo') }}{% if channel.favorito %} · <i class="bi bi-star-fill"></i>{% endif %}</small>
+              </span>
+              <i class="bi bi-play-fill folder-item-playing"></i>
+            </button>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="empty-compact" id="folder-empty" hidden>Nenhum item encontrado.</p>
+    </section>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script src="{{ url_for('static', filename='js/folder.js') }}" defer></script>
+{% endblock %}

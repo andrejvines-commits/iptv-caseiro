@@ -1,3 +1,34 @@
+// Detecta dois cliques no mesmo item; também funciona com o botão OK do controle remoto da Smart TV.
+function createDoubleTapTracker(interval = 450) {
+  let lastTarget;
+  let lastAt = 0;
+  return (target) => {
+    const now = performance.now();
+    const double = target === lastTarget && now - lastAt <= interval;
+    lastTarget = double ? undefined : target;
+    lastAt = now;
+    return double;
+  };
+}
+
+// Um clique filtra o catálogo pela pasta; dois cliques abrem a pasta com prévia.
+const folderTaps = createDoubleTapTracker(400);
+let folderNavigation;
+document.querySelectorAll(".category-link[data-folder-url]").forEach((link) => {
+  link.addEventListener("click", (event) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    window.clearTimeout(folderNavigation);
+    if (folderTaps(link)) {
+      window.location.href = link.dataset.folderUrl;
+    } else {
+      document.querySelectorAll(".category-link.active").forEach((item) => item.classList.remove("active"));
+      link.classList.add("active");
+      folderNavigation = window.setTimeout(() => { window.location.href = link.href; }, 400);
+    }
+  });
+});
+
 document.querySelectorAll("form[data-confirm]").forEach((form) => {
   form.addEventListener("submit", (event) => {
     if (!window.confirm(form.dataset.confirm)) event.preventDefault();

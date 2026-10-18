@@ -339,6 +339,34 @@ https://example.com/new.m3u8
         self.assertIn(b'id="volume-up"', response.data)
         self.assertIn(b"/player/2?autoplay=1", response.data)
 
+    def test_folder_view_previews_items_and_keeps_player_inside_folder(self) -> None:
+        with iptv.database_connection() as database:
+            created_at = "2026-01-01T00:00:00+00:00"
+            for name, category in (("Esporte 1", "Esportes"), ("Esporte 2", "Esportes"), ("Notícias", "Jornal")):
+                database.execute(
+                    """
+                    INSERT INTO canais
+                        (nome, descricao, categoria, logo, tipo, fonte, ativo, criado_em)
+                    VALUES (?, '', ?, '', 'stream', ?, 1, ?)
+                    """,
+                    (name, category, f"https://example.com/{name}.m3u8", created_at),
+                )
+
+        home = self.client.get("/")
+        self.assertIn(b'data-folder-url="/pasta?nome=Esportes"', home.data)
+
+        folder = self.client.get("/pasta?nome=Esportes")
+        self.assertEqual(folder.status_code, 200)
+        self.assertIn(b'id="preview-video"', folder.data)
+        self.assertIn("Esporte 1".encode(), folder.data)
+        self.assertNotIn("Notícias".encode(), folder.data)
+        self.assertIn(b"/player/2?autoplay=1&amp;pasta=Esportes", folder.data)
+
+        player = self.client.get("/player/2?pasta=Esportes")
+        self.assertIn(b"/player/3?autoplay=1&amp;pasta=Esportes", player.data)
+        self.assertNotIn(b"/player/4", player.data)
+        self.assertIn("Voltar à pasta".encode(), player.data)
+
     def test_favorite_channel_is_protected_from_deletion(self) -> None:
         favorite = self.client.post("/player/1/favorito", follow_redirects=True)
         self.assertEqual(favorite.status_code, 200)

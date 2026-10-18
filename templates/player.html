@@ -2,7 +2,7 @@
 {% block title %}{{ channel.nome }} | IPTV Caseiro{% endblock %}
 {% block content %}
 <main class="player-page">
-  <a class="back-link" href="{{ url_for('index') }}"><i class="bi bi-arrow-left"></i><span>Voltar aos canais</span></a>
+  <a class="back-link" href="{{ url_for('folder_view', nome=folder) if folder else url_for('index') }}"><i class="bi bi-arrow-left"></i><span>{{ 'Voltar à pasta' if folder else 'Voltar aos canais' }}</span></a>
   <div class="player-heading">
     <div>
       <p class="eyebrow">{{ channel.categoria }}</p>
@@ -43,8 +43,8 @@
       <button class="control-button" id="play-toggle" type="button" title="Pausar" aria-label="Pausar"><i class="bi bi-pause-fill"></i></button>
       <span class="control-label">Canal</span>
       {% if previous_channel %}
-        <a class="control-button" href="{{ url_for('player', channel_id=previous_channel.id, autoplay=1) }}" title="Canal anterior: {{ previous_channel.nome }}" aria-label="Canal anterior: {{ previous_channel.nome }}"><i class="bi bi-chevron-down"></i></a>
-        <a class="control-button" href="{{ url_for('player', channel_id=next_channel.id, autoplay=1) }}" title="Próximo canal: {{ next_channel.nome }}" aria-label="Próximo canal: {{ next_channel.nome }}"><i class="bi bi-chevron-up"></i></a>
+        <a class="control-button" href="{{ url_for('player', channel_id=previous_channel.id, autoplay=1, pasta=folder) }}" title="Canal anterior: {{ previous_channel.nome }}" aria-label="Canal anterior: {{ previous_channel.nome }}"><i class="bi bi-chevron-down"></i></a>
+        <a class="control-button" href="{{ url_for('player', channel_id=next_channel.id, autoplay=1, pasta=folder) }}" title="Próximo canal: {{ next_channel.nome }}" aria-label="Próximo canal: {{ next_channel.nome }}"><i class="bi bi-chevron-up"></i></a>
       {% else %}
         <button class="control-button" disabled title="Não há outro canal"><i class="bi bi-chevron-down"></i></button>
         <button class="control-button" disabled title="Não há outro canal"><i class="bi bi-chevron-up"></i></button>

@@ -436,6 +436,38 @@ def index():
     )
 
 
+@app.get("/pasta")
+def folder_view():
+    folder = request.args.get("nome", "").strip()
+    favorites_only = request.args.get("favoritos") == "1"
+    query = "SELECT * FROM canais WHERE ativo = 1"
+    parameters: list[object] = []
+    if favorites_only:
+        query += " AND favorito = 1"
+    if folder:
+        query += " AND categoria = ?"
+        parameters.append(folder)
+        session["last_viewed_category"] = folder
+    query += " ORDER BY nome"
+    with database_connection() as database:
+        channels = database.execute(query, parameters).fetchall()
+    items = [
+        {
+            "channel": channel,
+            "source": "" if channel["tipo"] == "externo" else channel_source(channel),
+            "available": channel["tipo"] != "arquivo" or (VIDEO_DIR / channel["fonte"]).is_file(),
+        }
+        for channel in channels
+    ]
+    return render_template(
+        "folder.html",
+        items=items,
+        folder=folder,
+        favorites_only=favorites_only,
+        title="Favoritos" if favorites_only else (folder or "Todos os canais"),
+    )
+
+
 @app.get("/player/<int:channel_id>")
 def player(channel_id: int):
     channel = get_channel(channel_id, active_only=True)
@@ -443,11 +475,15 @@ def player(channel_id: int):
         return redirect(url_for("open_external_channel", channel_id=channel_id))
     source = channel_source(channel)
     source_available = channel["tipo"] != "arquivo" or (VIDEO_DIR / channel["fonte"]).is_file()
+    # Quando o player é aberto a partir de uma pasta, a troca de canal fica dentro dela.
+    folder = request.args.get("pasta", "").strip() or None
+    query = "SELECT id, nome FROM canais WHERE ativo = 1 AND tipo != 'externo'"
+    parameters: list[object] = []
+    if folder:
+        query += " AND categoria = ?"
+        parameters.append(folder)
     with database_connection() as database:
-        active_channels = database.execute(
-            "SELECT id, nome FROM canais WHERE ativo = 1 AND tipo != 'externo' "
-            "ORDER BY categoria, nome"
-        ).fetchall()
+        active_channels = database.execute(query + " ORDER BY categoria, nome", parameters).fetchall()
     current_index = next(
         (index for index, item in enumerate(active_channels) if item["id"] == channel_id),
         0,
@@ -465,6 +501,7 @@ def player(channel_id: int):
         source_available=source_available,
         previous_channel=previous_channel,
         next_channel=next_channel,
+        folder=folder,
         recording=get_recording_status(),
         recording_supported=channel["tipo"] == "stream" and shutil.which("ffmpeg") is not None,
     )

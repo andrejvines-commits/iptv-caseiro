@@ -33,6 +33,8 @@ O projeto já inclui `videos/video-teste.mp4`, um pequeno vídeo em domínio pú
 
 Durante a reprodução, use os controles **Canal** para avançar ou voltar entre os canais ativos sem retornar ao catálogo. Os botões de volume ajustam o player em passos de 10%, oferecem modo mudo e preservam o nível escolhido ao trocar de canal.
 
+Na barra lateral, um clique filtra o catálogo pela pasta e dois cliques abrem a pasta em uma página própria. Nela, clicar em um canal inicia uma prévia ao lado da lista, com a programação atual quando disponível; dois cliques no canal, ou o botão **Tela cheia**, ampliam a reprodução. Pelo botão **Abrir no player**, a troca de canal permanece dentro da pasta.
+
 O tipo **Link externo** abre uma página oficial em nova aba e não tenta reproduzi-la como vídeo. Autenticações, como o login do Globoplay, são feitas exclusivamente no site de destino; o IPTV Caseiro não solicita nem armazena essas credenciais. Links externos não entram na playlist M3U nem nos controles de troca de canal.
 
 Você pode substituir esse arquivo por um MP4 próprio mantendo o mesmo nome.
