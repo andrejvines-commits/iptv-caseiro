@@ -2,11 +2,18 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from urllib.error import HTTPError, URLError
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import app as iptv
-from utils.m3u import PlaylistImportError, parse_playlist
+from utils.m3u import (
+    MAX_CHANNELS,
+    MAX_PLAYLIST_BYTES,
+    PlaylistImportError,
+    fetch_playlist,
+    parse_playlist,
+)
 
 
 class IPTVCaseiroTestCase(unittest.TestCase):
@@ -158,6 +165,121 @@ https://example.com/new.m3u8
     def test_rejects_invalid_m3u_content(self) -> None:
         with self.assertRaises(PlaylistImportError):
             parse_playlist("isto não é uma playlist")
+
+    def test_parses_more_than_three_thousand_channels(self) -> None:
+        entries = ["#EXTM3U"]
+        for index in range(3001):
+            entries.extend((f"#EXTINF:-1,Canal {index}", f"https://example.com/{index}.m3u8"))
+
+        channels = parse_playlist("\n".join(entries))
+
+        self.assertEqual(len(channels), 3001)
+        self.assertEqual(channels[-1].name, "Canal 3000")
+
+    def test_parser_still_respects_channel_limit(self) -> None:
+        entries = ["#EXTM3U"]
+        for index in range(MAX_CHANNELS + 1):
+            entries.extend((f"#EXTINF:-1,Canal {index}", f"https://example.com/{index}.m3u8"))
+
+        channels = parse_playlist("\n".join(entries))
+
+        self.assertEqual(len(channels), MAX_CHANNELS)
+
+    def test_rejects_m3u_downloads_over_size_limit(self) -> None:
+        url = "https://example.com/large.m3u"
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.geturl.return_value = url
+        response.headers.get.return_value = str(MAX_PLAYLIST_BYTES + 1)
+        opener = Mock()
+        opener.open.return_value = response
+
+        with patch("utils.m3u.validate_public_url"), patch(
+            "utils.m3u.build_opener", return_value=opener
+        ):
+            with self.assertRaisesRegex(PlaylistImportError, "50 MB"):
+                fetch_playlist(url)
+
+        response.read.assert_not_called()
+
+    def test_reports_http_access_denied_without_exposing_playlist_url(self) -> None:
+        url = "https://example.com/get.php?username=private&password=secret"
+        error = HTTPError(url, 403, "Forbidden", None, None)
+
+        with patch("utils.m3u.validate_public_url"), patch(
+            "utils.m3u.build_opener"
+        ) as build_opener:
+            build_opener.return_value.open.side_effect = error
+            with self.assertRaises(PlaylistImportError) as raised:
+                fetch_playlist(url)
+
+        self.assertIn("HTTP 403", str(raised.exception))
+        self.assertNotIn("private", str(raised.exception))
+        self.assertNotIn("secret", str(raised.exception))
+
+    def test_reports_playlist_connection_timeout(self) -> None:
+        url = "https://example.com/list.m3u"
+
+        with patch("utils.m3u.validate_public_url"), patch(
+            "utils.m3u.build_opener"
+        ) as build_opener:
+            build_opener.return_value.open.side_effect = URLError(TimeoutError())
+            with self.assertRaisesRegex(PlaylistImportError, "expirou"):
+                fetch_playlist(url)
+
+    def test_fetches_xtream_live_and_movie_catalogs(self) -> None:
+        url = "https://provider.example/portal/get.php?username=user&password=pass&type=m3u_plus&output=ts"
+        def response(body: bytes) -> Mock:
+            result = Mock()
+            result.__enter__ = Mock(return_value=result)
+            result.__exit__ = Mock(return_value=False)
+            result.geturl.return_value = "https://provider.example/portal/player_api.php"
+            result.headers.get.return_value = None
+            result.read.return_value = body
+            return result
+
+        live_category_response = response(b'[{"category_id":"7","category_name":"Noticias"}]')
+        live_stream_response = response(
+            b'[{"stream_id":123,"name":"Canal Teste","category_id":"7",'
+            b'"container_extension":"ts","stream_icon":"https://provider.example/logo.png"}]'
+        )
+        movie_category_response = response('[{"category_id":"9","category_name":"Ação"}]'.encode())
+        movie_stream_response = response(
+            b'[{"stream_id":456,"name":"Filme Teste","category_id":"9",'
+            b'"container_extension":"mp4","stream_icon":"https://provider.example/movie.png"}]'
+        )
+
+        with patch("utils.m3u.validate_public_url"), patch(
+            "utils.m3u.build_opener"
+        ) as build_opener:
+            build_opener.return_value.open.side_effect = [
+                live_category_response,
+                live_stream_response,
+                movie_category_response,
+                movie_stream_response,
+            ]
+            playlist = fetch_playlist(url)
+
+        channels = parse_playlist(playlist)
+        self.assertEqual(len(channels), 2)
+        self.assertEqual(channels[0].name, "Canal Teste")
+        self.assertEqual(channels[0].category, "Noticias")
+        self.assertEqual(
+            channels[0].source,
+            "https://provider.example/portal/live/user/pass/123.ts",
+        )
+        self.assertEqual(channels[1].name, "Filme Teste")
+        self.assertEqual(channels[1].category, "Filmes / Ação")
+        self.assertEqual(
+            channels[1].source,
+            "https://provider.example/portal/movie/user/pass/456.mp4",
+        )
+        requested_urls = [call.args[0].full_url for call in build_opener.return_value.open.call_args_list]
+        self.assertIn("action=get_live_categories", requested_urls[0])
+        self.assertIn("action=get_live_streams", requested_urls[1])
+        self.assertIn("action=get_vod_categories", requested_urls[2])
+        self.assertIn("action=get_vod_streams", requested_urls[3])
 
     def test_uses_local_playlist_when_network_is_unavailable(self) -> None:
         iptv.PLAYLIST_CACHE_PATH.write_text(

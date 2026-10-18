@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
 
 public final class M3uParser {
     public static final int MAX_BYTES = 50 * 1024 * 1024;
-    public static final int MAX_CHANNELS = 50_000;
+    public static final int MAX_CHANNELS = 100_000;
     private static final Pattern ATTRIBUTE = Pattern.compile("([\\w-]+)=\\\"([^\\\"]*)\\\"");
 
     private M3uParser() {}
