@@ -11,6 +11,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.View
 import android.widget.Toast
@@ -19,11 +20,16 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -49,6 +55,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,14 +66,17 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,12 +84,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
@@ -131,7 +144,7 @@ private const val BUNDLED_CATALOG_ASSET = "bundled-catalog.iptvbak"
 private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_2"
 private const val DAY_MS = 24L * 60L * 60L * 1000L
 
-private enum class Screen { HOME, MANAGE, EDIT, IMPORT, BACKUP, SERIES, PLAYER }
+private enum class Screen { HOME, FOLDER, MANAGE, EDIT, IMPORT, BACKUP, SERIES, PLAYER }
 
 private data class XtreamAccess(val root: String, val username: String, val password: String)
 
@@ -183,6 +196,9 @@ class MainActivity : ComponentActivity() {
     private val seriesLoadingState = mutableStateOf(false)
     private val seriesErrorState = mutableStateOf<String?>(null)
     private val playerReturnScreenState = mutableStateOf(Screen.HOME)
+    private val seriesReturnScreenState = mutableStateOf(Screen.HOME)
+    private val openFolderState = mutableStateOf<String?>(null)
+    private val startFullScreenState = mutableStateOf(false)
     private val recordingState = mutableStateOf<RecordingState>(RecordingState.Idle)
     private var checkingUpdates = false
     private var activePlayer: ExoPlayer? = null
@@ -304,15 +320,31 @@ class MainActivity : ComponentActivity() {
             screenState.value = when (screen) {
                 Screen.MANAGE -> Screen.HOME
                 Screen.PLAYER -> playerReturnScreenState.value
-                Screen.SERIES -> Screen.HOME
+                Screen.SERIES -> seriesReturnScreenState.value
+                Screen.FOLDER -> Screen.HOME
                 else -> Screen.MANAGE
             }
         }
         Scaffold(
+            modifier = Modifier.background(
+                Brush.verticalGradient(listOf(Color(0xFF151A35), MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)),
+            ),
+            containerColor = Color.Transparent,
             topBar = {
                 if (screen != Screen.PLAYER) {
                     TopAppBar(
-                        title = { Text("IPTV Caseiro") },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                        title = {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Box(
+                                    Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(
+                                        Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)),
+                                    ),
+                                    contentAlignment = Alignment.Center,
+                                ) { Text("▶", color = Color.White, fontWeight = FontWeight.Bold) }
+                                Text("IPTV Caseiro", fontWeight = FontWeight.ExtraBold)
+                            }
+                        },
                         navigationIcon = {
                             if (screen != Screen.HOME) TextButton(onClick = { screenState.value = Screen.HOME }) { Text("Voltar") }
                         },
@@ -327,6 +359,7 @@ class MainActivity : ComponentActivity() {
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when (screen) {
                     Screen.HOME -> HomeScreen(channels, continueWatchingState.value)
+                    Screen.FOLDER -> openFolderState.value?.let { FolderScreen(it, channels) }
                     Screen.MANAGE -> ManageScreen(channels)
                     Screen.EDIT -> EditorScreen(editingState.value)
                     Screen.IMPORT -> ImportScreen()
@@ -334,7 +367,10 @@ class MainActivity : ComponentActivity() {
                     Screen.SERIES -> seriesState.value?.let { SeriesScreen(it) }
                     Screen.PLAYER -> if (playing != null) {
                         val episodes = seriesEpisodesState.value
-                        val playable = if (episodes.any { it.source == playing!!.source }) episodes else channels.filter { it.active && it.sourceType !in setOf("EXTERNAL", "SERIES") }
+                        val folder = openFolderState.value.takeIf { playerReturnScreenState.value == Screen.FOLDER && it != "Todos" }
+                        val playable = if (episodes.any { it.source == playing!!.source }) episodes else channels.filter {
+                            it.active && it.sourceType !in setOf("EXTERNAL", "SERIES") && (folder == null || it.category == folder)
+                        }
                         PlayerScreen(playing!!, playable)
                     }
                 }
@@ -364,6 +400,7 @@ class MainActivity : ComponentActivity() {
             mutableStateOf(preferences.getString(LAST_VIEWED_CATEGORY, "").orEmpty())
         }
         var foldersToDelete by remember { mutableStateOf<Set<String>?>(null) }
+        val folderTaps = remember { DoubleTapTracker() }
         val activeChannels = remember(channels) { channels.filter { it.active } }
         val deletableFolders = remember(channels) {
             channels.map { it.category }.distinct().filterNot { it.equals("Todos", true) }.sorted()
@@ -387,6 +424,7 @@ class MainActivity : ComponentActivity() {
                         Card(
                             onClick = {
                                 playerReturnScreenState.value = Screen.HOME
+                                startFullScreenState.value = false
                                 playingState.value = channelFromProgress(progress)
                                 screenState.value = Screen.PLAYER
                             },
@@ -409,7 +447,12 @@ class MainActivity : ComponentActivity() {
                         Modifier.width(sidebarWidth).fillMaxHeight(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Pastas", fontWeight = FontWeight.Bold)
+                        Text("Pastas", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            "Toque duas vezes para abrir",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         FilterChip(
                             selected = favoritesOnly,
                             onClick = { favoritesOnly = !favoritesOnly },
@@ -419,18 +462,14 @@ class MainActivity : ComponentActivity() {
                         LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             items(categories, key = { it }) { folder ->
                                 val count = if (folder == "Todos") activeChannels.size else categoryCounts[folder] ?: 0
-                                FilterChip(
-                                    selected = category == folder,
-                                    onClick = {
-                                        category = folder
-                                        if (folder != "Todos") {
-                                            lastViewedCategory = folder
-                                            preferences.edit().putString(LAST_VIEWED_CATEGORY, folder).apply()
-                                        }
-                                    },
-                                    label = { Text(if (folder == "Todos") "Todos ($count)" else "📁 $folder ($count)", maxLines = 2) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
+                                FolderItem(folder, count, selected = category == folder) {
+                                    category = folder
+                                    if (folder != "Todos") {
+                                        lastViewedCategory = folder
+                                        preferences.edit().putString(LAST_VIEWED_CATEGORY, folder).apply()
+                                    }
+                                    if (folderTaps.isDoubleTap(folder)) openFolder(folder)
+                                }
                             }
                         }
                         if (deletableFolders.isNotEmpty()) {
@@ -557,31 +596,357 @@ class MainActivity : ComponentActivity() {
                 onWatched(channel.category)
                 when (channel.sourceType) {
                     "EXTERNAL" -> openExternalLink(channel.source)
-                    "SERIES" -> openSeries(channel)
+                    "SERIES" -> {
+                        seriesReturnScreenState.value = Screen.HOME
+                        openSeries(channel)
+                    }
                     else -> {
                         playerReturnScreenState.value = Screen.HOME
+                        startFullScreenState.value = false
                         playingState.value = channel
                         screenState.value = Screen.PLAYER
                     }
                 }
             },
-            modifier = Modifier.fillMaxWidth().height(130.dp).focusable(),
+            modifier = Modifier.fillMaxWidth().height(132.dp).focusable(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         ) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(channel.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 2)
-                    TextButton(onClick = { toggleFavorite(channel) }) { Text(if (channel.favorite) "★" else "☆") }
+            Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ChannelAvatar(channel, 48.dp)
+                    Column(Modifier.weight(1f)) {
+                        Text(channel.name, fontWeight = FontWeight.Bold, maxLines = 2)
+                        Text(
+                            channel.category,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
                 }
-                Text(channel.category, color = MaterialTheme.colorScheme.secondary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ContentBadge(channel)
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { toggleFavorite(channel) }) {
+                        Text(if (channel.favorite) "★" else "☆", color = MaterialTheme.colorScheme.tertiary)
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun FolderItem(name: String, count: Int, selected: Boolean, onClick: () -> Unit) {
+        Card(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth().focusable(),
+            colors = CardDefaults.cardColors(
+                containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+            ),
+            border = if (selected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(if (name == "Todos") "▦" else "📁")
+                Text(name, modifier = Modifier.weight(1f), maxLines = 2, style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    when (channel.sourceType) {
-                        "LOCAL" -> "Vídeo do aparelho"
-                        "EXTERNAL" -> "Link externo · ${redactSource(channel.source)}"
-                        "SERIES" -> "Série · toque para ver os episódios"
-                        else -> redactSource(channel.source)
-                    },
-                    maxLines = 1,
+                    count.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+        }
+    }
+
+    @Composable
+    private fun ChannelAvatar(channel: Channel, size: Dp) {
+        val hue = ((channel.name.hashCode() and 0x7fffffff) % 360).toFloat()
+        val colors = listOf(Color.hsv(hue, 0.55f, 0.9f), Color.hsv((hue + 45f) % 360f, 0.7f, 0.5f))
+        Box(
+            Modifier.size(size).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(colors)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(channelInitials(channel.name), color = Color.White, fontWeight = FontWeight.Bold)
+        }
+    }
+
+    @Composable
+    private fun ContentBadge(channel: Channel) {
+        val (label, color) = when {
+            channel.sourceType == "SERIES" -> "SÉRIE" to MaterialTheme.colorScheme.tertiary
+            channel.sourceType == "EXTERNAL" -> "LINK" to MaterialTheme.colorScheme.onSurfaceVariant
+            channel.sourceType == "LOCAL" -> "LOCAL" to MaterialTheme.colorScheme.secondary
+            isResumableContent(channel.source) -> "FILME" to MaterialTheme.colorScheme.primary
+            else -> "● AO VIVO" to LiveRed
+        }
+        Text(
+            label,
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(color.copy(alpha = 0.14f))
+                .padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+    }
+
+    private fun openFolder(folder: String) {
+        openFolderState.value = folder
+        screenState.value = Screen.FOLDER
+    }
+
+    private fun isPreviewable(channel: Channel) = channel.sourceType !in setOf("EXTERNAL", "SERIES")
+
+    private fun openFromFolder(channel: Channel) {
+        when (channel.sourceType) {
+            "EXTERNAL" -> openExternalLink(channel.source)
+            "SERIES" -> {
+                seriesReturnScreenState.value = Screen.FOLDER
+                openSeries(channel)
+            }
+            else -> {
+                playerReturnScreenState.value = Screen.FOLDER
+                startFullScreenState.value = true
+                playingState.value = channel
+                screenState.value = Screen.PLAYER
+            }
+        }
+    }
+
+    @Composable
+    private fun FolderScreen(folder: String, channels: List<Channel>) {
+        val folderItems = remember(channels, folder) {
+            channels.filter { it.active && (folder == "Todos" || it.category == folder) }
+        }
+        var query by rememberSaveable(folder) { mutableStateOf("") }
+        var selectedSource by rememberSaveable(folder) { mutableStateOf(folderItems.firstOrNull { isPreviewable(it) }?.source) }
+        val selected = folderItems.firstOrNull { it.source == selectedSource }
+        val visible = remember(folderItems, query) {
+            if (query.isBlank()) folderItems else folderItems.filter { it.name.contains(query, ignoreCase = true) }
+        }
+        val taps = remember { DoubleTapTracker() }
+        BoxWithConstraints(Modifier.fillMaxSize().padding(16.dp)) {
+            val wide = maxWidth >= 720.dp
+            val preview = @Composable { modifier: Modifier -> PreviewPane(selected, modifier) }
+            val list = @Composable { modifier: Modifier ->
+                Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("📁 $folder", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1)
+                            Text(
+                                "${folderItems.size} itens · toque para pré-visualizar, toque duas vezes para tela cheia",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        query, { query = it },
+                        label = { Text("Buscar nesta pasta") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (visible.isEmpty()) {
+                        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                            Text("Nenhum item encontrado.")
+                        }
+                    } else {
+                        LazyColumn(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(visible, key = { it.id }) { item ->
+                                val isSelected = item.source == selectedSource
+                                Card(
+                                    onClick = {
+                                        if (taps.isDoubleTap(item.source) || !isPreviewable(item) && isSelected) {
+                                            openFromFolder(item)
+                                        } else {
+                                            selectedSource = item.source
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().focusable(),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                                    ),
+                                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+                                ) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        ChannelAvatar(item, 40.dp)
+                                        Column(Modifier.weight(1f)) {
+                                            Text(item.name, fontWeight = FontWeight.Bold, maxLines = 1)
+                                            ContentBadge(item)
+                                        }
+                                        if (isSelected && isPreviewable(item)) Text("▶", color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (wide) {
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    preview(Modifier.weight(1.4f).fillMaxHeight())
+                    list(Modifier.weight(1f).fillMaxHeight())
+                }
+            } else {
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    preview(Modifier.fillMaxWidth())
+                    list(Modifier.fillMaxWidth().weight(1f))
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun PreviewPane(channel: Channel?, modifier: Modifier) {
+        Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Box(
+                    Modifier.fillMaxWidth().aspectRatio(16f / 9f).background(Color.Black),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        channel == null -> Text("Selecione um item para ver a prévia", color = Color.White.copy(alpha = 0.7f))
+                        isPreviewable(channel) -> key(channel.source) { PreviewPlayer(channel, Modifier.fillMaxSize()) }
+                        else -> ChannelAvatar(channel, 88.dp)
+                    }
+                    if (channel != null) {
+                        Box(Modifier.matchParentSize().clickable { openFromFolder(channel) })
+                        if (isPreviewable(channel)) {
+                            Text(
+                                "PRÉVIA",
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(10.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(LiveRed)
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            )
+                        }
+                    }
+                }
+                if (channel != null) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text(channel.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2)
+                                Text(channel.category, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            }
+                            ContentBadge(channel)
+                        }
+                        if (parseXtreamLiveAccess(channel.source) != null) key(channel.source) { EpgSummary(channel) }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { openFromFolder(channel) }) {
+                                Text(
+                                    when (channel.sourceType) {
+                                        "SERIES" -> "Ver episódios"
+                                        "EXTERNAL" -> "Abrir link"
+                                        else -> "⛶  Tela cheia"
+                                    },
+                                )
+                            }
+                            OutlinedButton(onClick = { toggleFavorite(channel) }) {
+                                Text(if (channel.favorite) "★ Favorito" else "☆ Favoritar")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun EpgSummary(channel: Channel) {
+        var schedule by remember { mutableStateOf<EpgSchedule?>(null) }
+        var loading by remember { mutableStateOf(true) }
+        DisposableEffect(channel.source) {
+            val cancelled = AtomicBoolean(false)
+            executor.execute {
+                val result = runCatching { fetchEpgSchedule(channel.source) }.getOrNull()
+                if (!cancelled.get()) runOnUiThread {
+                    if (!cancelled.get()) {
+                        schedule = result
+                        loading = false
+                    }
+                }
+            }
+            onDispose { cancelled.set(true) }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            when {
+                loading -> Text("Buscando programação…", style = MaterialTheme.typography.bodySmall)
+                schedule?.current == null && schedule?.next == null ->
+                    Text("Programação não disponível", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else -> {
+                    schedule?.current?.let { program ->
+                        Text("Agora · ${formatEpgPeriod(program)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        Text(program.title, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                    schedule?.next?.let { program ->
+                        Text("A seguir · ${formatEpgPeriod(program)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                        Text(program.title, maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
+
+    @androidx.annotation.OptIn(UnstableApi::class)
+    @Composable
+    private fun PreviewPlayer(channel: Channel, modifier: Modifier) {
+        val context = LocalContext.current
+        var buffering by remember { mutableStateOf(true) }
+        var failed by remember { mutableStateOf(false) }
+        val player = remember {
+            createExoPlayer(context).apply {
+                addListener(object : Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        buffering = playbackState == Player.STATE_BUFFERING
+                        if (playbackState == Player.STATE_READY) failed = false
+                    }
+
+                    override fun onPlayerError(error: PlaybackException) {
+                        buffering = false
+                        failed = true
+                    }
+                })
+                setMediaItem(MediaItem.fromUri(channel.source))
+                prepare()
+                playWhenReady = true
+            }
+        }
+        DisposableEffect(player) {
+            activePlayer = player
+            onDispose {
+                if (activePlayer === player) activePlayer = null
+                player.release()
+            }
+        }
+        Box(modifier, contentAlignment = Alignment.Center) {
+            AndroidView(
+                factory = {
+                    PlayerView(it).apply {
+                        this.player = player
+                        useController = false
+                        setShowBuffering(PlayerView.SHOW_BUFFERING_NEVER)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+            if (failed) {
+                Text("Prévia indisponível para este canal", color = Color.White.copy(alpha = 0.8f))
+            } else if (buffering) {
+                CircularProgressIndicator()
             }
         }
     }
@@ -885,6 +1250,7 @@ class MainActivity : ComponentActivity() {
                         Card(
                             onClick = {
                                 playerReturnScreenState.value = Screen.SERIES
+                                startFullScreenState.value = false
                                 playingState.value = episode
                                 screenState.value = Screen.PLAYER
                             },
@@ -906,7 +1272,7 @@ class MainActivity : ComponentActivity() {
     private fun PlayerScreen(channel: Channel, playable: List<Channel>) {
         val context = LocalContext.current
         val isLiveChannel = channel.sourceType == "STREAM" && !isResumableContent(channel.source)
-        var fullScreen by remember(channel.id, channel.source) { mutableStateOf(!isLiveChannel) }
+        var fullScreen by remember(channel.id, channel.source) { mutableStateOf(!isLiveChannel || startFullScreenState.value) }
         var playbackError by remember(channel.id, channel.source) { mutableStateOf<String?>(null) }
         var buffering by remember(channel.id, channel.source) { mutableStateOf(true) }
         var controlsVisible by remember(channel.id, channel.source) { mutableStateOf(true) }
@@ -944,18 +1310,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         val player = remember(channel.id, channel.source) {
-            val httpDataSource = DefaultHttpDataSource.Factory()
-                .setUserAgent("IPTV-Caseiro/${BuildConfig.VERSION_NAME}")
-                // Muitos painéis Xtream entregam a API em HTTPS, mas redirecionam
-                // o vídeo para um CDN HTTP. O Media3 bloqueia essa troca por padrão.
-                .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(20_000)
-                .setReadTimeoutMs(60_000)
-            val mediaSourceFactory = DefaultMediaSourceFactory(context)
-                .setDataSourceFactory(DefaultDataSource.Factory(context, httpDataSource))
-            ExoPlayer.Builder(context)
-                .setMediaSourceFactory(mediaSourceFactory)
-                .build().apply {
+            createExoPlayer(context).apply {
                 addListener(object : Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         buffering = playbackState == Player.STATE_BUFFERING
@@ -1263,6 +1618,20 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    @androidx.annotation.OptIn(UnstableApi::class)
+    private fun createExoPlayer(context: Context): ExoPlayer {
+        val httpDataSource = DefaultHttpDataSource.Factory()
+            .setUserAgent("IPTV-Caseiro/${BuildConfig.VERSION_NAME}")
+            // Muitos painéis Xtream entregam a API em HTTPS, mas redirecionam
+            // o vídeo para um CDN HTTP. O Media3 bloqueia essa troca por padrão.
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(20_000)
+            .setReadTimeoutMs(60_000)
+        val mediaSourceFactory = DefaultMediaSourceFactory(context)
+            .setDataSourceFactory(DefaultDataSource.Factory(context, httpDataSource))
+        return ExoPlayer.Builder(context).setMediaSourceFactory(mediaSourceFactory).build()
     }
 
     private fun parseXtreamLiveAccess(value: String): XtreamLiveAccess? {
@@ -2086,10 +2455,46 @@ private fun hasXtreamPathCredentials(uri: URI): Boolean {
     return typeIndex >= 0 && segments.size >= typeIndex + 4
 }
 
+private val LiveRed = Color(0xFFFF4D6D)
+private const val DOUBLE_TAP_MS = 450L
+
+/** Detecta dois toques no mesmo item; funciona com toque e com o botão OK do controle remoto. */
+private class DoubleTapTracker {
+    private var lastKey: String? = null
+    private var lastAt = 0L
+
+    fun isDoubleTap(key: String): Boolean {
+        val now = SystemClock.uptimeMillis()
+        val double = key == lastKey && now - lastAt <= DOUBLE_TAP_MS
+        lastKey = if (double) null else key
+        lastAt = now
+        return double
+    }
+}
+
+private fun channelInitials(name: String): String =
+    name.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotBlank() }.take(2)
+        .joinToString("") { it.take(1).uppercase() }.ifBlank { "TV" }
+
 @Composable
 private fun IptvTheme(content: @Composable () -> Unit) {
     val colors: ColorScheme = darkColorScheme(
-        primary = Color(0xFF66D9EF), secondary = Color(0xFF9AE6B4), background = Color(0xFF0B1220), surface = Color(0xFF172033),
+        primary = Color(0xFF8B7CFF),
+        onPrimary = Color.White,
+        primaryContainer = Color(0xFF2B2660),
+        onPrimaryContainer = Color(0xFFE5E0FF),
+        secondary = Color(0xFF3DDBD9),
+        tertiary = Color(0xFFFFB547),
+        background = Color(0xFF0B0F1E),
+        surface = Color(0xFF131A2E),
+        surfaceVariant = Color(0xFF1B2440),
+        onSurfaceVariant = Color(0xFFAEB8D6),
+        outline = Color(0xFF34406A),
     )
-    MaterialTheme(colorScheme = colors, content = content)
+    val shapes = Shapes(
+        small = RoundedCornerShape(12.dp),
+        medium = RoundedCornerShape(18.dp),
+        large = RoundedCornerShape(24.dp),
+    )
+    MaterialTheme(colorScheme = colors, shapes = shapes, content = content)
 }
