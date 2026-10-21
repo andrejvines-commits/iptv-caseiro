@@ -1,0 +1,21 @@
+<!doctype html>
+<html><body>
+<video id="v" muted autoplay playsinline></video>
+<pre id="log"></pre>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1/dist/mpegts.min.js"></script>
+<script>
+const out = document.getElementById("log");
+const log = (m) => { out.textContent += m + "\n"; };
+const v = document.getElementById("v");
+log("mpegts=" + !!window.mpegts + " features=" + JSON.stringify(window.mpegts?.getFeatureList()));
+log("h264 aac=" + (window.MediaSource && MediaSource.isTypeSupported('video/mp4; codecs="avc1.640028,mp4a.40.2"')));
+["loadedmetadata", "canplay", "playing", "waiting", "error", "stalled"].forEach((e) => v.addEventListener(e, () => log("video:" + e + " rs=" + v.readyState + " t=" + v.currentTime.toFixed(2))));
+window.mpegts.LoggingControl.addLogListener((level, msg) => { if (level !== "debug" && level !== "verbose") log(level + ": " + msg); });
+const p = window.mpegts.createPlayer({ type: "mpegts", isLive: true, url: "/stream/7250" }, { enableStashBuffer: false, liveBufferLatencyChasing: true, lazyLoad: false });
+p.on(window.mpegts.Events.ERROR, (a, b, c) => log("ERROR " + a + " " + b + " " + JSON.stringify(c)));
+p.on(window.mpegts.Events.MEDIA_INFO, (i) => log("MEDIA_INFO " + i.mimeType));
+p.attachMediaElement(v); p.load();
+v.play().then(() => log("play ok")).catch((e) => log("play fail " + e));
+setInterval(() => log("tick rs=" + v.readyState + " t=" + v.currentTime.toFixed(2) + " buf=" + (v.buffered.length ? v.buffered.end(0).toFixed(2) : 0)), 2000);
+</script>
+</body></html>

@@ -48,7 +48,8 @@
               data-name="{{ channel.nome }}"
               data-category="{{ channel.categoria }}"
               data-type="{{ channel.tipo }}"
-              data-source="{{ item.source }}"
+              data-source="{{ item.playback[0] }}"
+              data-kind="{{ item.playback[1] }}"
               data-available="{{ '1' if item.available else '0' }}"
               data-player-url="{{ url_for('open_external_channel', channel_id=channel.id) if channel.tipo == 'externo' else url_for('player', channel_id=channel.id, autoplay=1, pasta=folder or None) }}"
               data-epg-url="{{ url_for('channel_epg', channel_id=channel.id) if channel.tipo == 'stream' else '' }}">
@@ -71,5 +72,7 @@
 {% endblock %}
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1/dist/mpegts.min.js"></script>
+<script src="{{ url_for('static', filename='js/media.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/folder.js') }}" defer></script>
 {% endblock %}

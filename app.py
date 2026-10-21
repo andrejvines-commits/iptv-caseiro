@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlencode, urljoin, urlparse, urlsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from flask import (
@@ -26,6 +27,7 @@ from flask import (
     send_from_directory,
     jsonify,
     session,
+    stream_with_context,
     url_for,
 )
 from werkzeug.utils import secure_filename
@@ -230,6 +232,21 @@ def channel_source(channel: sqlite3.Row, external: bool = False) -> str:
     if channel["tipo"] == "arquivo":
         return url_for("serve_video", filename=channel["fonte"], _external=external)
     return channel["fonte"]
+
+
+def playback_source(channel: sqlite3.Row) -> tuple[str, str]:
+    """Retorna o endereço usado pelo navegador e o formato esperado pelo player."""
+    if channel["tipo"] != "stream":
+        return channel_source(channel), "file"
+    path = urlparse(channel["fonte"]).path.lower()
+    if path.endswith(".m3u8"):
+        return channel["fonte"], "hls"
+    # Navegadores não tocam MPEG-TS diretamente e muitos servidores IPTV não liberam CORS.
+    # O stream passa pelo servidor local e é decodificado no navegador pelo mpegts.js.
+    extension = Path(path).suffix
+    if extension in {".ts", ".flv"} or ("/live/" in path and not extension):
+        return url_for("stream_proxy", channel_id=channel["id"]), "flv" if extension == ".flv" else "mpegts"
+    return channel["fonte"], "file"
 
 
 def get_recording_status() -> dict[str, object] | None:
@@ -454,7 +471,7 @@ def folder_view():
     items = [
         {
             "channel": channel,
-            "source": "" if channel["tipo"] == "externo" else channel_source(channel),
+            "playback": ("", "") if channel["tipo"] == "externo" else playback_source(channel),
             "available": channel["tipo"] != "arquivo" or (VIDEO_DIR / channel["fonte"]).is_file(),
         }
         for channel in channels
@@ -473,7 +490,7 @@ def player(channel_id: int):
     channel = get_channel(channel_id, active_only=True)
     if channel["tipo"] == "externo":
         return redirect(url_for("open_external_channel", channel_id=channel_id))
-    source = channel_source(channel)
+    source, source_kind = playback_source(channel)
     source_available = channel["tipo"] != "arquivo" or (VIDEO_DIR / channel["fonte"]).is_file()
     # Quando o player é aberto a partir de uma pasta, a troca de canal fica dentro dela.
     folder = request.args.get("pasta", "").strip() or None
@@ -498,6 +515,7 @@ def player(channel_id: int):
         "player.html",
         channel=channel,
         source=source,
+        source_kind=source_kind,
         source_available=source_available,
         previous_channel=previous_channel,
         next_channel=next_channel,
@@ -563,6 +581,39 @@ def stop_channel_recording(channel_id: int):
     else:
         flash("Não havia gravação em andamento.", "warning")
     return redirect(url_for("player", channel_id=channel_id))
+
+
+STREAM_PROXY_HEADERS = ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges")
+
+
+@app.get("/stream/<int:channel_id>")
+def stream_proxy(channel_id: int):
+    # Repassa somente streams cadastrados; o navegador nunca escolhe o endereço de destino.
+    channel = get_channel(channel_id, active_only=True)
+    if channel["tipo"] != "stream" or not validate_url(channel["fonte"]):
+        abort(404)
+    headers = {"User-Agent": "IPTV-Caseiro/1.0", "Accept": "*/*"}
+    if request.headers.get("Range"):
+        headers["Range"] = request.headers["Range"]
+    try:
+        upstream = urlopen(Request(channel["fonte"], headers=headers), timeout=20)
+    except HTTPError as error:
+        error.close()
+        return Response(f"O servidor do canal respondeu com o código {error.code}.", status=502)
+    except (URLError, OSError):
+        return Response("Não foi possível conectar ao servidor do canal.", status=502)
+
+    def relay():
+        with upstream:
+            while chunk := upstream.read(64 * 1024):
+                yield chunk
+
+    response = Response(stream_with_context(relay()), status=upstream.status, direct_passthrough=True)
+    for name in STREAM_PROXY_HEADERS:
+        if upstream.headers.get(name):
+            response.headers[name] = upstream.headers[name]
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/player/<int:channel_id>/epg")

@@ -15,7 +15,7 @@ const folderEmpty = document.querySelector("#folder-empty");
 const folderItems = [...document.querySelectorAll(".folder-item")];
 
 const TYPE_LABELS = { stream: "● AO VIVO", arquivo: "ARQUIVO", externo: "LINK" };
-let hls;
+let releaseMedia = () => {};
 let selected;
 let guideRequest = 0;
 
@@ -30,8 +30,8 @@ function showMessage(icon, text) {
 }
 
 function stopPreview() {
-  hls?.destroy();
-  hls = undefined;
+  releaseMedia();
+  releaseMedia = () => {};
   previewVideo.pause();
   previewVideo.removeAttribute("src");
   previewVideo.load();
@@ -39,22 +39,11 @@ function stopPreview() {
   previewBadge.hidden = true;
 }
 
-function playPreview(source) {
+function playPreview(source, kind) {
   previewMessage.hidden = true;
   previewLoading.hidden = false;
   previewBadge.hidden = false;
-  if (/\.m3u8(?:$|\?)/i.test(source) && !previewVideo.canPlayType("application/vnd.apple.mpegurl")) {
-    if (!window.Hls?.isSupported()) {
-      previewFailed();
-      return;
-    }
-    hls = new window.Hls({ enableWorker: true });
-    hls.loadSource(source);
-    hls.attachMedia(previewVideo);
-    hls.on(window.Hls.Events.ERROR, (_, data) => { if (data.fatal) previewFailed(); });
-  } else {
-    previewVideo.src = source;
-  }
+  releaseMedia = attachMediaSource(previewVideo, source, kind, previewFailed);
   // Navegadores bloqueiam som automático sem interação; nesse caso a prévia inicia sem áudio.
   previewVideo.play().catch(() => {
     previewVideo.muted = true;
@@ -100,7 +89,7 @@ function select(item) {
   selected?.classList.remove("is-selected");
   selected = item;
   item.classList.add("is-selected");
-  const { name, category, type, source, available, playerUrl, epgUrl } = item.dataset;
+  const { name, category, type, source, kind, available, playerUrl, epgUrl } = item.dataset;
   previewName.textContent = name;
   previewCategory.textContent = category;
   previewType.textContent = TYPE_LABELS[type] || type;
@@ -116,7 +105,7 @@ function select(item) {
   stopPreview();
   if (external) showMessage("bi-box-arrow-up-right", "Link oficial: abre no site de destino");
   else if (available !== "1") showMessage("bi-file-earmark-play", "Arquivo não encontrado na pasta videos");
-  else playPreview(source);
+  else playPreview(source, kind);
   loadGuide(epgUrl);
 }
 
@@ -166,7 +155,7 @@ folderSearch?.addEventListener("input", () => {
   folderEmpty.hidden = visible > 0;
 });
 
-window.addEventListener("beforeunload", () => hls?.destroy());
+window.addEventListener("beforeunload", () => releaseMedia());
 
 const first = folderItems.find((item) => item.dataset.type !== "externo" && item.dataset.available === "1");
 if (first) {

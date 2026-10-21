@@ -22,7 +22,7 @@
   <div class="player-shell" id="player-shell">
   <section class="video-stage">
     {% if source_available %}
-      <video id="video-player" controls playsinline preload="metadata" data-source="{{ source }}" data-type="{{ channel.tipo }}"></video>
+      <video id="video-player" controls playsinline preload="metadata" data-source="{{ source }}" data-kind="{{ source_kind }}" data-type="{{ channel.tipo }}"></video>
       <div class="player-loading" id="player-loading"><span class="spinner"></span><span>Preparando reprodução...</span></div>
       <div class="player-error" id="player-error" hidden>
         <i class="bi bi-exclamation-triangle"></i>
@@ -74,5 +74,7 @@
 {% endblock %}
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mpegts.js@1/dist/mpegts.min.js"></script>
+<script src="{{ url_for('static', filename='js/media.js') }}" defer></script>
 <script src="{{ url_for('static', filename='js/player.js') }}" defer></script>
 {% endblock %}

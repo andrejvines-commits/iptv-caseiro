@@ -11,7 +11,6 @@ const programGuide = document.querySelector("#program-guide");
 
 if (video) {
   const source = video.dataset.source;
-  let hls;
 
   const savedVolume = Number(window.localStorage.getItem("iptv-volume"));
   const savedMuted = window.localStorage.getItem("iptv-muted") === "true";
@@ -112,22 +111,7 @@ if (video) {
     errorBox?.removeAttribute("hidden");
   }
 
-  if (/\.m3u8(?:$|\?)/i.test(source)) {
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = source;
-    } else if (window.Hls?.isSupported()) {
-      hls = new window.Hls({ enableWorker: true });
-      hls.loadSource(source);
-      hls.attachMedia(video);
-      hls.on(window.Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) fail();
-      });
-    } else {
-      fail();
-    }
-  } else {
-    video.src = source;
-  }
+  const releaseMedia = attachMediaSource(video, source, video.dataset.kind || "file", fail);
 
   video.addEventListener("loadeddata", ready, { once: true });
   video.addEventListener("canplay", ready, { once: true });
@@ -135,5 +119,5 @@ if (video) {
     video.addEventListener("canplay", () => video.play().catch(() => {}), { once: true });
   }
   video.addEventListener("error", fail);
-  window.addEventListener("beforeunload", () => hls?.destroy());
+  window.addEventListener("beforeunload", () => releaseMedia());
 }
