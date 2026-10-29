@@ -46,4 +46,13 @@ public interface ChannelDao {
 
     @Query("DELETE FROM playback_progress WHERE source = :source")
     void deleteProgress(String source);
+
+    @Query("SELECT * FROM watch_history WHERE source = :source LIMIT 1")
+    WatchHistory watchHistoryFor(String source);
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void saveWatchHistory(WatchHistory history);
+
+    @Query("SELECT * FROM watch_history WHERE contentKind = :contentKind ORDER BY watchedMs DESC, lastWatchedAt DESC LIMIT :limit")
+    List<WatchHistory> mostWatched(String contentKind, int limit);
 }

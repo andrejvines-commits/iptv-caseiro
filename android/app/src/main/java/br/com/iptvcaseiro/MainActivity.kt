@@ -113,6 +113,7 @@ import androidx.media3.ui.PlayerView
 import br.com.iptvcaseiro.data.AppDatabase
 import br.com.iptvcaseiro.data.Channel
 import br.com.iptvcaseiro.data.PlaybackProgress
+import br.com.iptvcaseiro.data.WatchHistory
 import br.com.iptvcaseiro.util.BackupCrypto
 import br.com.iptvcaseiro.util.M3uParser
 import br.com.iptvcaseiro.util.VersionUtils
@@ -188,6 +189,8 @@ class MainActivity : ComponentActivity() {
     private val recordingExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val channelsState = mutableStateOf<List<Channel>>(emptyList())
     private val continueWatchingState = mutableStateOf<List<PlaybackProgress>>(emptyList())
+    private val mostWatchedChannelsState = mutableStateOf<List<WatchHistory>>(emptyList())
+    private val mostWatchedSeriesState = mutableStateOf<List<WatchHistory>>(emptyList())
     private val screenState = mutableStateOf(Screen.HOME)
     private val editingState = mutableStateOf<Channel?>(null)
     private val playingState = mutableStateOf<Channel?>(null)
@@ -366,7 +369,12 @@ class MainActivity : ComponentActivity() {
         ) { padding ->
             Box(Modifier.fillMaxSize().padding(padding)) {
                 when (screen) {
-                    Screen.HOME -> HomeScreen(channels, continueWatchingState.value)
+                    Screen.HOME -> HomeScreen(
+                        channels,
+                        continueWatchingState.value,
+                        mostWatchedChannelsState.value,
+                        mostWatchedSeriesState.value,
+                    )
                     Screen.FOLDER -> openFolderState.value?.let { FolderScreen(it, channels) }
                     Screen.MANAGE -> ManageScreen(channels)
                     Screen.EDIT -> EditorScreen(editingState.value)
@@ -398,7 +406,12 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun HomeScreen(channels: List<Channel>, continueWatching: List<PlaybackProgress>) {
+    private fun HomeScreen(
+        channels: List<Channel>,
+        continueWatching: List<PlaybackProgress>,
+        mostWatchedChannels: List<WatchHistory>,
+        mostWatchedSeries: List<WatchHistory>,
+    ) {
         val context = LocalContext.current
         val preferences = remember(context) { context.getSharedPreferences(PREFS, MODE_PRIVATE) }
         var query by rememberSaveable { mutableStateOf("") }
@@ -445,6 +458,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
+            if (query.isBlank() && !favoritesOnly && category == "Todos") {
+                MostWatchedRow("Mais assistidos - canais", mostWatchedChannels)
+                MostWatchedRow("Mais assistidos - séries", mostWatchedSeries)
             }
             OutlinedTextField(query, { query = it }, label = { Text("Pesquisar canais") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
@@ -583,6 +600,33 @@ class MainActivity : ComponentActivity() {
                     ) { Text("Excluir selecionadas") }
                 },
             )
+        }
+    }
+
+    @Composable
+    private fun MostWatchedRow(title: String, items: List<WatchHistory>) {
+        if (items.isEmpty()) return
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(items, key = { it.source }) { history ->
+                Card(
+                    onClick = {
+                        playerReturnScreenState.value = Screen.HOME
+                        startFullScreenState.value = false
+                        playingState.value = channelFromHistory(history)
+                        screenState.value = Screen.PLAYER
+                    },
+                    modifier = Modifier.width(210.dp).height(90.dp).focusable(),
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(history.name, fontWeight = FontWeight.Bold, maxLines = 2)
+                        Text(
+                            "${formatPlaybackTime(history.watchedMs)} assistidos",
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -1293,6 +1337,18 @@ class MainActivity : ComponentActivity() {
         var channelListCategory by remember(channel.id, channel.source) { mutableStateOf("Todos") }
         var epgSchedule by remember(channel.id, channel.source) { mutableStateOf<EpgSchedule?>(null) }
         var epgLoading by remember(channel.id, channel.source) { mutableStateOf(false) }
+        var watchStartedAt by remember(channel.id, channel.source) { mutableStateOf(0L) }
+        var watchedSinceSave by remember(channel.id, channel.source) { mutableStateOf(0L) }
+        fun flushWatchedTime() {
+            if (watchStartedAt != 0L) {
+                watchedSinceSave += (SystemClock.elapsedRealtime() - watchStartedAt).coerceAtLeast(0L)
+                watchStartedAt = 0L
+            }
+            if (watchedSinceSave >= 1_000L) {
+                saveWatchTime(channel, watchedSinceSave)
+                watchedSinceSave = 0L
+            }
+        }
         val recording = recordingState.value
         val recordingThisChannel = recording.let {
             it is RecordingState.Recording && it.source == channel.source ||
@@ -1340,6 +1396,7 @@ class MainActivity : ComponentActivity() {
 
                     override fun onIsPlayingChanged(playing: Boolean) {
                         isPlaying = playing
+                        if (playing) watchStartedAt = SystemClock.elapsedRealtime() else flushWatchedTime()
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
@@ -1371,6 +1428,7 @@ class MainActivity : ComponentActivity() {
             activePlayer = player
             activePlaybackChannel = channel
             onDispose {
+                flushWatchedTime()
                 if (activePlayer === player) activePlayer = null
                 savePlaybackProgress(channel, player.currentPosition, player.duration)
                 if (activePlaybackChannel?.source == channel.source) activePlaybackChannel = null
@@ -1870,9 +1928,13 @@ class MainActivity : ComponentActivity() {
             val dao = AppDatabase.get(this).channelDao()
             val rows = dao.all()
             val continueWatching = dao.continueWatching(20)
+            val mostWatchedChannels = dao.mostWatched("CHANNEL", 20)
+            val mostWatchedSeries = dao.mostWatched("SERIES", 20)
             runOnUiThread {
                 channelsState.value = rows
                 continueWatchingState.value = continueWatching
+                mostWatchedChannelsState.value = mostWatchedChannels
+                mostWatchedSeriesState.value = mostWatchedSeries
                 after?.invoke()
             }
         }
@@ -1914,9 +1976,36 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun saveWatchTime(channel: Channel, watchedMs: Long) {
+        if (watchedMs < 1_000L || channel.source.isBlank() || channel.sourceType == "EXTERNAL") return
+        executor.execute {
+            val dao = AppDatabase.get(this).channelDao()
+            val history = dao.watchHistoryFor(channel.source) ?: WatchHistory().apply { source = channel.source }
+            history.name = channel.name
+            history.category = channel.category
+            history.logoUrl = channel.logoUrl
+            history.sourceType = channel.sourceType
+            history.contentKind = if (Regex("/(series)/", RegexOption.IGNORE_CASE).containsMatchIn(channel.source)) "SERIES" else "CHANNEL"
+            history.watchedMs += watchedMs
+            history.lastWatchedAt = System.currentTimeMillis()
+            dao.saveWatchHistory(history)
+            val mostWatchedChannels = dao.mostWatched("CHANNEL", 20)
+            val mostWatchedSeries = dao.mostWatched("SERIES", 20)
+            runOnUiThread {
+                mostWatchedChannelsState.value = mostWatchedChannels
+                mostWatchedSeriesState.value = mostWatchedSeries
+            }
+        }
+    }
+
     private fun channelFromProgress(progress: PlaybackProgress) = Channel().apply {
         name = progress.name; category = progress.category; logoUrl = progress.logoUrl
         sourceType = progress.sourceType; source = progress.source; active = true
+    }
+
+    private fun channelFromHistory(history: WatchHistory) = Channel().apply {
+        name = history.name; category = history.category; logoUrl = history.logoUrl
+        sourceType = history.sourceType; source = history.source; active = true
     }
 
     private fun formatPlaybackTime(positionMs: Long): String {
