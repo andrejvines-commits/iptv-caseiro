@@ -32,4 +32,18 @@ public class M3uParserTest {
         assertEquals("Televisão", channels.get(0).name);
         assertEquals("Notícias", channels.get(0).category);
     }
+
+    @Test public void parsesMoreThanFourThousandChannels() throws Exception {
+        StringBuilder content = new StringBuilder("#EXTM3U\n");
+        for (int index = 0; index < 7_000; index++) {
+            content.append("#EXTINF:-1,Canal ").append(index).append('\n')
+                .append("https://example.test/live/").append(index).append('\n');
+        }
+
+        List<Channel> channels = M3uParser.parse(
+            new ByteArrayInputStream(content.toString().getBytes(StandardCharsets.UTF_8))
+        );
+
+        assertEquals(7_000, channels.size());
+    }
 }

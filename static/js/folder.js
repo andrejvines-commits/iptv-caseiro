@@ -144,11 +144,21 @@ folderItems.forEach((item) => {
 fullscreenButton.addEventListener("click", enterFullscreen);
 previewStage.addEventListener("dblclick", enterFullscreen);
 
+function normalizeSearch(value) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase();
+}
+
 folderSearch?.addEventListener("input", () => {
-  const term = folderSearch.value.trim().toLocaleLowerCase();
+  const terms = normalizeSearch(folderSearch.value).trim().split(/\s+/).filter(Boolean);
   let visible = 0;
   folderItems.forEach((item) => {
-    const match = !term || item.dataset.name.toLocaleLowerCase().includes(term);
+    const searchableFields = [
+      item.dataset.name,
+      item.dataset.category,
+      item.dataset.description,
+      item.dataset.type,
+    ].map(normalizeSearch);
+    const match = terms.every((term) => searchableFields.some((field) => field.includes(term)));
     item.parentElement.hidden = !match;
     if (match) visible += 1;
   });

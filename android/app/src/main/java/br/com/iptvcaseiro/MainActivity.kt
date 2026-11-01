@@ -145,6 +145,8 @@ private const val LAST_VIEWED_CATEGORY = "last_viewed_category"
 private const val BUNDLED_CATALOG_ASSET = "bundled-catalog.iptvbak"
 private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_2"
 private const val DAY_MS = 24L * 60L * 60L * 1000L
+private const val MAX_BACKUP_BYTES = 16 * 1024 * 1024
+private const val IMPORT_BATCH_SIZE = 1_000
 
 // Uma margem maior absorve oscilações de rede nos canais ao vivo. Os valores
 // também limitam a memória ocupada: o player conserva no máximo 90 segundos.
@@ -338,7 +340,7 @@ class MainActivity : ComponentActivity() {
         }
         Scaffold(
             modifier = Modifier.background(
-                Brush.verticalGradient(listOf(Color(0xFF151A35), MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)),
+                Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.background)),
             ),
             containerColor = Color.Transparent,
             topBar = {
@@ -2252,7 +2254,7 @@ class MainActivity : ComponentActivity() {
             val dao = AppDatabase.get(this).channelDao()
             if (replaceExisting) dao.deleteAll()
             var added = 0
-            channels.chunked(1_000).forEach { batch -> added += dao.insertAll(batch).count { it != -1L } }
+            channels.chunked(IMPORT_BATCH_SIZE).forEach { batch -> added += dao.insertAll(batch).count { it != -1L } }
             val duplicates = channels.size - added
             loadChannels {
                 playlistLoadingState.value = false
@@ -2392,15 +2394,24 @@ class MainActivity : ComponentActivity() {
     private fun restoreBackup(uri: Uri, password: CharArray, replace: Boolean) {
         executor.execute {
             try {
-                val encrypted = contentResolver.openInputStream(uri).use { input -> requireNotNull(input); input.readBytes() }
-                if (encrypted.size > 4 * 1024 * 1024) throw IllegalStateException("O backup ultrapassa o limite permitido.")
+                val encrypted = contentResolver.openInputStream(uri).use { input ->
+                    readBoundedBytes(requireNotNull(input), MAX_BACKUP_BYTES)
+                }
                 val plain = BackupCrypto.decrypt(encrypted, password)
                 val array = JSONObject(String(plain, StandardCharsets.UTF_8)).getJSONArray("channels")
                 if (array.length() > M3uParser.MAX_CHANNELS) throw IllegalStateException("O backup contém canais demais.")
                 val dao = AppDatabase.get(this).channelDao()
                 if (replace) dao.deleteAll()
                 var added = 0
-                for (index in 0 until array.length()) if (dao.insert(channelFromJson(array.getJSONObject(index))) != -1L) added++
+                val batch = ArrayList<Channel>(IMPORT_BATCH_SIZE)
+                for (index in 0 until array.length()) {
+                    batch += channelFromJson(array.getJSONObject(index))
+                    if (batch.size == IMPORT_BATCH_SIZE) {
+                        added += dao.insertAll(batch).count { it != -1L }
+                        batch.clear()
+                    }
+                }
+                if (batch.isNotEmpty()) added += dao.insertAll(batch).count { it != -1L }
                 loadChannels { showNotice("Backup restaurado: $added itens adicionados."); screenState.value = Screen.MANAGE }
             } catch (_: javax.crypto.AEADBadTagException) {
                 showNotice("Senha incorreta ou arquivo de backup adulterado.")
@@ -2408,6 +2419,22 @@ class MainActivity : ComponentActivity() {
                 showNotice(error.message ?: "Não foi possível restaurar o backup.")
             } finally { password.fill('\u0000') }
         }
+    }
+
+    private fun readBoundedBytes(input: java.io.InputStream, maximum: Int): ByteArray {
+        val output = ByteArrayOutputStream(minOf(maximum, 64 * 1024))
+        val buffer = ByteArray(64 * 1024)
+        var total = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (read > maximum - total) {
+                throw IllegalStateException("O backup ultrapassa o limite permitido de 16 MB.")
+            }
+            total += read
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
     }
 
     private fun checkForUpdates(manual: Boolean) {
@@ -2587,17 +2614,17 @@ private fun channelInitials(name: String): String =
 @Composable
 private fun IptvTheme(content: @Composable () -> Unit) {
     val colors: ColorScheme = darkColorScheme(
-        primary = Color(0xFF8B7CFF),
+        primary = Color(0xFF22C55E),
         onPrimary = Color.White,
-        primaryContainer = Color(0xFF2B2660),
-        onPrimaryContainer = Color(0xFFE5E0FF),
-        secondary = Color(0xFF3DDBD9),
+        primaryContainer = Color(0xFF14532D),
+        onPrimaryContainer = Color(0xFFDCFCE7),
+        secondary = Color(0xFF4ADE80),
         tertiary = Color(0xFFFFB547),
-        background = Color(0xFF0B0F1E),
-        surface = Color(0xFF131A2E),
-        surfaceVariant = Color(0xFF1B2440),
-        onSurfaceVariant = Color(0xFFAEB8D6),
-        outline = Color(0xFF34406A),
+        background = Color(0xFF08130D),
+        surface = Color(0xFF0E1E15),
+        surfaceVariant = Color(0xFF162A1D),
+        onSurfaceVariant = Color(0xFFA9C2AD),
+        outline = Color(0xFF294634),
     )
     val shapes = Shapes(
         small = RoundedCornerShape(12.dp),

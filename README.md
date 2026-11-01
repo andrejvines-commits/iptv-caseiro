@@ -136,18 +136,16 @@ Crie um repositório **público** e envie este projeto para a branch `main`. O r
 https://SEU-USUARIO.github.io/NOME-DO-REPOSITORIO/
 ```
 
-### 3. Criar a primeira versão
+### 3. Publicar uma versão ou atualização
 
-Crie e envie uma tag no formato `vMAJOR.MINOR.PATCH`:
+Crie e envie uma tag no formato `vMAJOR.MINOR.PATCH`. O workflow **Gerar APK e Release** compilará `iptv-caseiro.apk` assinado e o anexará à Release:
 
 ```powershell
-git tag v1.0.0
-git push origin v1.0.0
+git tag v2.0.25
+git push origin v2.0.25
 ```
 
-O workflow **Gerar APK e Release** compilará `iptv-caseiro.apk` com o nome correto do repositório e o anexará à Release. A página de instalação passará a encontrá-lo automaticamente.
-
-Para cada atualização, altere o código, envie os commits e crie uma tag maior, como `v1.0.1`. Não reutilize uma versão antiga. O botão **Atualizar** compara a versão instalada com a Release mais recente.
+Use sempre uma versão maior que a última Release; não reutilize tags antigas. O botão **Atualizar** compara a versão instalada com a Release mais recente.
 
 ### Permissões Android
 

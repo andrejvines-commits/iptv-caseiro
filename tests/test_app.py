@@ -342,14 +342,18 @@ https://example.com/new.m3u8
     def test_folder_view_previews_items_and_keeps_player_inside_folder(self) -> None:
         with iptv.database_connection() as database:
             created_at = "2026-01-01T00:00:00+00:00"
-            for name, category in (("Esporte 1", "Esportes"), ("Esporte 2", "Esportes"), ("Notícias", "Jornal")):
+            for name, category, description in (
+                ("Esporte 1", "Esportes", "Campeonato regional"),
+                ("Esporte 2", "Esportes", "Partida ao vivo"),
+                ("Notícias", "Jornal", "Noticiário local"),
+            ):
                 database.execute(
                     """
                     INSERT INTO canais
                         (nome, descricao, categoria, logo, tipo, fonte, ativo, criado_em)
-                    VALUES (?, '', ?, '', 'stream', ?, 1, ?)
+                    VALUES (?, ?, ?, '', 'stream', ?, 1, ?)
                     """,
-                    (name, category, f"https://example.com/{name}.m3u8", created_at),
+                    (name, description, category, f"https://example.com/{name}.m3u8", created_at),
                 )
 
         home = self.client.get("/")
@@ -359,6 +363,7 @@ https://example.com/new.m3u8
         self.assertEqual(folder.status_code, 200)
         self.assertIn(b'id="preview-video"', folder.data)
         self.assertIn("Esporte 1".encode(), folder.data)
+        self.assertIn(b'data-description="Campeonato regional"', folder.data)
         self.assertNotIn("Notícias".encode(), folder.data)
         self.assertIn(b"/player/2?autoplay=1&amp;pasta=Esportes", folder.data)
 
