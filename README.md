@@ -79,17 +79,15 @@ Arquivos locais são servidos apenas da pasta `videos`, com nomes e extensões v
 
 FFmpeg não é necessário para MP4 compatível com o navegador. Futuras funções de conversão poderão usá-lo, mas nenhum comando fornecido pelo navegador é executado no sistema.
 
-## Aplicativo Android 2.0 autônomo
+## Aplicativo Android AppFuncional
 
 O diretório `android/` agora contém um aplicativo nativo em Kotlin e Jetpack Compose. Ele não usa WebView, Flask nem o computador: os canais ficam no próprio aparelho em um banco Room e são reproduzidos pelo Media3 ExoPlayer.
 
+O APK é instalado sem canais ou listas pré-carregados e abre diretamente, sem pedir senha. Adicione sua lista M3U por URL ou arquivo em **Gerenciar > Importar playlist M3U**, ou cadastre streams e links externos. Não há servidor ou lista privada embutida no aplicativo.
+
 Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, links externos, escolher vídeos com o seletor seguro do Android, importar playlists M3U por URL ou arquivo, editar, favoritar, ativar e excluir vários itens. Na tela de pastas, também é possível selecionar uma ou todas as pastas para exclusão em lote. Endereços Xtream (`get.php`) são reconhecidos automaticamente: o aplicativo consulta as APIs de TV ao vivo, filmes e séries, e carrega os episódios de uma série quando ela é aberta. URLs privadas ficam armazenadas somente na área interna do aplicativo e aparecem ocultadas na interface, inclusive quando as credenciais fazem parte do caminho do stream. A importação mostra uma prévia selecionável e aceita até 100.000 itens. Em **Backup**, a opção **Importar banco do computador** transfere diretamente os streams e links externos do arquivo local `database/banco.db`, sem consultar os servidores dos canais.
 
-A versão 2.0.8 inclui um catálogo privado criptografado com AES-256-GCM. Na primeira abertura, o aplicativo exige a senha definida fora do código-fonte para descriptografar e importar esse catálogo. A senha não é armazenada no APK nem no repositório.
-
-O aplicativo também oferece pesquisa e pastas de categorias visíveis e clicáveis em uma barra vertical à esquerda, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha. Durante a reprodução, o botão **Canais** abre um painel com busca, filtro por pasta e troca direta de canal sem voltar ao catálogo. A reprodução é pausada quando o aplicativo sai do primeiro plano. Na tela inicial, um toque seleciona a pasta e dois toques a abrem em uma visualização própria: ao tocar em um canal, a prévia começa a tocar ao lado da lista, com a programação atual quando disponível; dois toques no canal, ou o botão **Tela cheia**, iniciam a reprodução completa. Ao trocar de canal a partir de uma pasta aberta, a navegação permanece dentro dela. Ao abrir novamente uma série com progresso salvo, o app abre automaticamente o último episódio assistido e continua do ponto em que a reprodução foi interrompida.
-
-Na versão 2.0.10, o catálogo criptografado foi renovado pela API de categorias do provedor e contém 1.163 itens, incluindo 24 canais na pasta Telecine. A nova revisão do catálogo solicita novamente a senha na primeira abertura para mesclar os canais e ignorar duplicatas.
+O aplicativo também oferece pesquisa e pastas de categorias visíveis e clicáveis em uma barra vertical à esquerda, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha opcional. A senha é solicitada somente quando você escolhe criar ou restaurar um backup. Durante a reprodução, o botão **Canais** abre um painel com busca, filtro por pasta e troca direta de canal sem voltar ao catálogo. A reprodução é pausada quando o aplicativo sai do primeiro plano. Na tela inicial, um toque seleciona a pasta e dois toques a abrem em uma visualização própria: ao tocar em um canal, a prévia começa a tocar ao lado da lista, com a programação atual quando disponível; dois toques no canal, ou o botão **Tela cheia**, iniciam a reprodução completa. Ao trocar de canal a partir de uma pasta aberta, a navegação permanece dentro dela. Ao abrir novamente uma série com progresso salvo, o app abre automaticamente o último episódio assistido e continua do ponto em que a reprodução foi interrompida.
 
 O botão **Atualizar** consulta a última GitHub Release e sempre apresenta o resultado. Também há uma verificação silenciosa ao abrir, limitada a uma vez por dia. O pacote `br.com.iptvcaseiro` e a chave de assinatura permanecem os mesmos para permitir atualização sobre a versão 1.0.1.
 
@@ -141,8 +139,8 @@ https://SEU-USUARIO.github.io/NOME-DO-REPOSITORIO/
 Crie e envie uma tag no formato `vMAJOR.MINOR.PATCH`. O workflow **Gerar APK e Release** compilará `iptv-caseiro.apk` assinado e o anexará à Release:
 
 ```powershell
-git tag v2.0.25
-git push origin v2.0.25
+git tag v2.0.27
+git push origin v2.0.27
 ```
 
 Use sempre uma versão maior que a última Release; não reutilize tags antigas. O botão **Atualizar** compara a versão instalada com a Release mais recente.

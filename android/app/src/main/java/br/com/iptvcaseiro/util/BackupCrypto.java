@@ -43,7 +43,7 @@ public final class BackupCrypto {
         ByteBuffer buffer = ByteBuffer.wrap(data);
         byte[] magic = new byte[MAGIC.length];
         buffer.get(magic);
-        if (!java.util.Arrays.equals(magic, MAGIC)) throw new IOException("Este arquivo não é um backup do IPTV Caseiro.");
+        if (!java.util.Arrays.equals(magic, MAGIC)) throw new IOException("Este arquivo não é um backup do AppFuncional.");
         byte[] salt = new byte[16];
         byte[] iv = new byte[12];
         buffer.get(salt);

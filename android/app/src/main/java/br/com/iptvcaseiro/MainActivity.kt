@@ -142,8 +142,6 @@ private const val APK_NAME = "iptv-caseiro.apk"
 private const val PREFS = "iptv_caseiro"
 private const val UPDATE_CHECKED_AT = "update_checked_at"
 private const val LAST_VIEWED_CATEGORY = "last_viewed_category"
-private const val BUNDLED_CATALOG_ASSET = "bundled-catalog.iptvbak"
-private const val BUNDLED_CATALOG_UNLOCKED = "bundled_catalog_unlocked_2"
 private const val DAY_MS = 24L * 60L * 60L * 1000L
 private const val MAX_BACKUP_BYTES = 16 * 1024 * 1024
 private const val IMPORT_BATCH_SIZE = 1_000
@@ -201,9 +199,6 @@ class MainActivity : ComponentActivity() {
     private val passwordActionState = mutableStateOf<PasswordAction?>(null)
     private val playlistPreviewState = mutableStateOf<List<Channel>>(emptyList())
     private val playlistLoadingState = mutableStateOf(false)
-    private val bundledCatalogLockedState = mutableStateOf(true)
-    private val bundledCatalogLoadingState = mutableStateOf(false)
-    private val bundledCatalogErrorState = mutableStateOf<String?>(null)
     private val seriesState = mutableStateOf<Channel?>(null)
     private val seriesEpisodesState = mutableStateOf<List<Channel>>(emptyList())
     private val seriesLoadingState = mutableStateOf(false)
@@ -250,7 +245,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         prefs.edit().remove("server_url").apply()
-        bundledCatalogLockedState.value = !prefs.getBoolean(BUNDLED_CATALOG_UNLOCKED, false)
         registerLaunchers()
         registerDownloadReceiver()
         loadChannels()
@@ -355,7 +349,7 @@ class MainActivity : ComponentActivity() {
                                     ),
                                     contentAlignment = Alignment.Center,
                                 ) { Text("▶", color = Color.White, fontWeight = FontWeight.Bold) }
-                                Text("IPTV Caseiro", fontWeight = FontWeight.ExtraBold)
+                                Text("AppFuncional", fontWeight = FontWeight.ExtraBold)
                             }
                         },
                         navigationIcon = {
@@ -397,14 +391,13 @@ class MainActivity : ComponentActivity() {
         noticeState.value?.let { notice ->
             AlertDialog(
                 onDismissRequest = { noticeState.value = null },
-                title = { Text("IPTV Caseiro") },
+                title = { Text("AppFuncional") },
                 text = { Text(notice) },
                 confirmButton = { TextButton(onClick = { noticeState.value = null }) { Text("OK") } },
             )
         }
         UpdateDialog(updateState.value)
         passwordActionState.value?.let { PasswordDialog(it) }
-        if (bundledCatalogLockedState.value) BundledCatalogDialog()
     }
 
     @Composable
@@ -637,7 +630,7 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Seu catálogo está vazio", style = MaterialTheme.typography.headlineSmall)
-                Text("Cadastre um canal, escolha um vídeo ou importe uma playlist M3U.")
+                Text("Adicione o link da sua lista M3U, cadastre um canal ou importe um arquivo.")
                 Button(onClick = onManage) { Text("Adicionar conteúdo") }
             }
         }
@@ -1240,43 +1233,6 @@ class MainActivity : ComponentActivity() {
                     }
                     password = ""
                 }) { Text("Continuar") }
-            },
-        )
-    }
-
-    @Composable
-    private fun BundledCatalogDialog() {
-        var password by rememberSaveable { mutableStateOf("") }
-        val loading by bundledCatalogLoadingState
-        val error by bundledCatalogErrorState
-        AlertDialog(
-            onDismissRequest = {},
-            title = { Text("Desbloquear catálogo") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Esta versão contém um catálogo privado criptografado. Informe a senha para liberar os canais neste aparelho.")
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it; bundledCatalogErrorState.value = null },
-                        label = { Text("Senha") },
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        singleLine = true,
-                        enabled = !loading,
-                    )
-                    if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error)
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = password.isNotBlank() && !loading,
-                    onClick = {
-                        val chars = password.toCharArray()
-                        password = ""
-                        unlockBundledCatalog(chars)
-                    },
-                ) { Text(if (loading) "Desbloqueando…" else "Desbloquear") }
             },
         )
     }
@@ -2331,51 +2287,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun unlockBundledCatalog(password: CharArray) {
-        if (bundledCatalogLoadingState.value) {
-            password.fill('\u0000')
-            return
-        }
-        bundledCatalogLoadingState.value = true
-        bundledCatalogErrorState.value = null
-        executor.execute {
-            try {
-                val encrypted = assets.open(BUNDLED_CATALOG_ASSET).use { input ->
-                    val bytes = input.readBytes()
-                    if (bytes.size > 8 * 1024 * 1024) throw IllegalStateException("O catálogo incluído ultrapassa o limite permitido.")
-                    bytes
-                }
-                val plain = BackupCrypto.decrypt(encrypted, password)
-                val root = JSONObject(String(plain, StandardCharsets.UTF_8))
-                if (root.optInt("format") != 1) throw IllegalStateException("O catálogo incluído possui formato incompatível.")
-                val array = root.getJSONArray("channels")
-                if (array.length() > M3uParser.MAX_CHANNELS) throw IllegalStateException("O catálogo incluído contém canais demais.")
-                val channels = ArrayList<Channel>(array.length())
-                for (index in 0 until array.length()) channels += channelFromJson(array.getJSONObject(index))
-                val added = AppDatabase.get(this).channelDao().insertAll(channels).count { it != -1L }
-                val duplicates = channels.size - added
-                getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(BUNDLED_CATALOG_UNLOCKED, true).apply()
-                loadChannels {
-                    bundledCatalogLoadingState.value = false
-                    bundledCatalogLockedState.value = false
-                    showNotice("Catálogo desbloqueado: $added canais adicionados e $duplicates repetidos ignorados.")
-                }
-            } catch (_: javax.crypto.AEADBadTagException) {
-                runOnUiThread {
-                    bundledCatalogLoadingState.value = false
-                    bundledCatalogErrorState.value = "Senha incorreta. Tente novamente."
-                }
-            } catch (_: Exception) {
-                runOnUiThread {
-                    bundledCatalogLoadingState.value = false
-                    bundledCatalogErrorState.value = "Não foi possível desbloquear o catálogo incluído."
-                }
-            } finally {
-                password.fill('\u0000')
-            }
-        }
-    }
-
     private fun exportBackup(uri: Uri, password: CharArray) {
         executor.execute {
             try {
@@ -2475,7 +2386,7 @@ class MainActivity : ComponentActivity() {
         if (file.exists() && !file.delete()) { showNotice("Não foi possível substituir o instalador anterior."); return }
         pendingApk = file
         val request = DownloadManager.Request(Uri.parse(apkUrl))
-            .setTitle("Atualização do IPTV Caseiro").setDescription("Baixando nova versão")
+            .setTitle("Atualização do AppFuncional").setDescription("Baixando nova versão")
             .setMimeType("application/vnd.android.package-archive")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             .setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, APK_NAME)
@@ -2489,7 +2400,7 @@ class MainActivity : ComponentActivity() {
         if (!packageManager.canRequestPackageInstalls()) {
             waitingInstallPermission = true
             AlertDialog.Builder(this).setTitle("Permitir instalação")
-                .setMessage("Autorize o IPTV Caseiro a instalar aplicativos desconhecidos e volte para continuar.")
+                .setMessage("Autorize o AppFuncional a instalar aplicativos desconhecidos e volte para continuar.")
                 .setNegativeButton("Cancelar", null)
                 .setPositiveButton("Abrir configuração") { _, _ -> startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))) }
                 .show()
