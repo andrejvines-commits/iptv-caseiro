@@ -67,6 +67,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -77,6 +78,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -1287,6 +1289,21 @@ class MainActivity : ComponentActivity() {
         var buffering by remember(channel.id, channel.source) { mutableStateOf(true) }
         var controlsVisible by remember(channel.id, channel.source) { mutableStateOf(true) }
         var controlsReset by remember(channel.id, channel.source) { mutableIntStateOf(0) }
+        var showBrightnessControl by remember(channel.id, channel.source) { mutableStateOf(false) }
+        val originalScreenBrightness = remember { window.attributes.screenBrightness }
+        var screenBrightness by remember(channel.id, channel.source) {
+            mutableFloatStateOf(
+                (if (originalScreenBrightness >= 0f) {
+                    originalScreenBrightness
+                } else {
+                    Settings.System.getInt(
+                        contentResolver,
+                        Settings.System.SCREEN_BRIGHTNESS,
+                        128,
+                    ).coerceIn(13, 255) / 255f
+                }).coerceIn(0.05f, 1f),
+            )
+        }
         var playerView by remember(channel.id, channel.source) { mutableStateOf<PlayerView?>(null) }
         var automaticRetries by remember(channel.id, channel.source) { mutableIntStateOf(0) }
         var isPlaying by remember(channel.id, channel.source) { mutableStateOf(false) }
@@ -1330,6 +1347,10 @@ class MainActivity : ComponentActivity() {
             if (playable.size > 1 && channelIndex >= 0) {
                 playingState.value = playable[(channelIndex + offset + playable.size) % playable.size]
             }
+        }
+        fun updateScreenBrightness(value: Float) {
+            screenBrightness = value.coerceIn(0.05f, 1f)
+            window.attributes = window.attributes.apply { screenBrightness = value.coerceIn(0.05f, 1f) }
         }
         val player = remember(channel.id, channel.source) {
             createExoPlayer(context).apply {
@@ -1401,6 +1422,13 @@ class MainActivity : ComponentActivity() {
             val insets = WindowCompat.getInsetsController(window, window.decorView)
             if (fullScreen) insets.hide(WindowInsetsCompat.Type.systemBars()) else insets.show(WindowInsetsCompat.Type.systemBars())
             onDispose { if (fullScreen) insets.show(WindowInsetsCompat.Type.systemBars()) }
+        }
+        DisposableEffect(window) {
+            onDispose {
+                window.attributes = window.attributes.apply {
+                    screenBrightness = originalScreenBrightness
+                }
+            }
         }
         DisposableEffect(channel.id, channel.source) {
             val cancelled = AtomicBoolean(false)
@@ -1491,6 +1519,10 @@ class MainActivity : ComponentActivity() {
                 ) {
                     if (!fullScreen) Button(onClick = { fullScreen = true }) { Text("Tela cheia") }
                     Button(onClick = {
+                        showBrightnessControl = !showBrightnessControl
+                        controlsReset += 1
+                    }) { Text("Brilho") }
+                    Button(onClick = {
                         controlsReset += 1
                         if (player.isPlaying) player.pause() else player.play()
                     }) { Text(if (isPlaying) "Pausar" else "Continuar") }
@@ -1545,6 +1577,21 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                    }
+                }
+            }
+            if (showBrightnessControl) {
+                Card(
+                    Modifier.align(Alignment.BottomCenter).padding(16.dp).fillMaxWidth(0.7f),
+                ) {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                        Text("Brilho da tela: ${(screenBrightness * 100).toInt()}%")
+                        Slider(
+                            value = screenBrightness,
+                            onValueChange = ::updateScreenBrightness,
+                            valueRange = 0.05f..1f,
+                        )
+                        TextButton(onClick = { showBrightnessControl = false }) { Text("Fechar") }
                     }
                 }
             }
@@ -2397,6 +2444,19 @@ class MainActivity : ComponentActivity() {
     private fun installDownloadedApk() {
         val file = pendingApk
         if (file == null || !file.isFile) { showNotice("O arquivo da atualização não foi encontrado."); return }
+        val archive = packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+        if (archive == null) {
+            showNotice("O APK baixado está inválido. Baixe a atualização novamente.")
+            return
+        }
+        if (archive.packageName != packageName) {
+            showNotice("Esta atualização pertence a outro aplicativo e não pode atualizar o AppFuncional.")
+            return
+        }
+        if (!VersionUtils.isNewer(archive.versionName.orEmpty(), BuildConfig.VERSION_NAME)) {
+            showNotice("O APK baixado não contém uma versão mais recente do AppFuncional.")
+            return
+        }
         if (!packageManager.canRequestPackageInstalls()) {
             waitingInstallPermission = true
             AlertDialog.Builder(this).setTitle("Permitir instalação")

@@ -89,15 +89,9 @@ Em **Gerenciar**, é possível cadastrar streams HTTP/HLS, links externos, escol
 
 O aplicativo também oferece pesquisa e pastas de categorias visíveis e clicáveis em uma barra vertical à esquerda, layout adaptável para celular/tablet, launcher e navegação por controle remoto na Android TV, além de backup AES-256-GCM protegido por senha opcional. A senha é solicitada somente quando você escolhe criar ou restaurar um backup. Durante a reprodução, o botão **Canais** abre um painel com busca, filtro por pasta e troca direta de canal sem voltar ao catálogo. A reprodução é pausada quando o aplicativo sai do primeiro plano. Na tela inicial, um toque seleciona a pasta e dois toques a abrem em uma visualização própria: ao tocar em um canal, a prévia começa a tocar ao lado da lista, com a programação atual quando disponível; dois toques no canal, ou o botão **Tela cheia**, iniciam a reprodução completa. Ao trocar de canal a partir de uma pasta aberta, a navegação permanece dentro dela. Ao abrir novamente uma série com progresso salvo, o app abre automaticamente o último episódio assistido e continua do ponto em que a reprodução foi interrompida.
 
-O botão **Atualizar** consulta a última GitHub Release e sempre apresenta o resultado. Também há uma verificação silenciosa ao abrir, limitada a uma vez por dia. O pacote `br.com.iptvcaseiro` e a chave de assinatura permanecem os mesmos para permitir atualização sobre a versão 1.0.1.
+O botão **Atualizar** consulta a última GitHub Release, valida se o APK baixado é válido, pertence ao mesmo pacote e tem uma versão maior antes de abrir o instalador. Também há uma verificação silenciosa ao abrir, limitada a uma vez por dia. O pacote `br.com.iptvcaseiro` e a chave de assinatura permanecem os mesmos para permitir atualização sobre a versão 1.0.1. Durante a reprodução, o controle **Brilho** permite ajustar temporariamente a tela e restaura o ajuste anterior ao sair do player.
 
-### Aplicativo Android legado 1.x e página de instalação
-
-O diretório `android/` contém um aplicativo Android que exibe este sistema em uma WebView. No primeiro uso, ele pede o endereço mostrado pelo Flask, por exemplo `http://192.168.1.20:5000`. O computador e o Android precisam estar na mesma rede, exceto quando o Flask estiver hospedado em um servidor HTTPS próprio.
-
-O aplicativo possui os botões **Servidor** e **Atualizar**. A atualização consulta a última Release deste repositório, baixa o arquivo `iptv-caseiro.apk` e abre a confirmação do Android. Por segurança, o Android não permite que um aplicativo comum conclua a instalação silenciosamente.
-
-A página pública de download está em `docs/`. Os workflows em `.github/workflows/` publicam essa página e geram o APK assinado.
+O APK assinado é publicado em cada GitHub Release. A [página de download](./docs/) apresenta a versão mais recente e as instruções de instalação. No Android, a confirmação da instalação é sempre feita pelo sistema.
 
 ### 1. Criar a chave de assinatura (somente uma vez)
 
